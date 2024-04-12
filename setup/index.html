@@ -1,0 +1,144 @@
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Remote Labs</title>
+</head>
+<body>
+<div class="content">
+    <h1>Remote Labs</h1>
+    <h3>Install Information</h3>
+<ul>
+    <li>
+        We put a folder called {{ remoteLabsDirectory }}. Here is where you will put your lab
+        configuration files and your websites for interacting with equipment.
+    </li>
+    <li>
+        We created a remla folder in {{ settingsDirectory }}. This is mostly for remla's use, and you won't
+        need to interact with it much. You will be able to find logs for mediamtx and nginx there if you
+        should need to look at those.
+    </li>
+    <li>
+        We turned on i2c for you. This is necessary if you are using an Arducam hat. If you'd like to turn it off,
+        run <code>sudo rasp-config</code> and turn it off through the interface options menu.
+    </li>
+    <li>We made sure you had the dependent programs installed. Namely: {{ packagesToCheck }}</li>
+    <li>
+        We then downloaded <a href="https://github.com/bluenviron/mediamtx">MediaMTX</a> {{ mediamtxVersion }}
+        and moved the binary file to {{ mediamtxBinaryLocation }} and the settings file to
+        {{ mediamtxSettingsLocation }} which you shouldn't need to touch. This program
+        allows us to share the Raspberry Pi Camera feed to the browser via WebRTC. (If you want to change 
+        the camera settings, you can do that by editing the camera.conf file in ~/remla and then 
+        run <code>remla camera update</code>)
+    </li>
+    <li>
+        It's important to note we have currently made a patch to get MediaMTX to work by creating a
+        system link between libcamera.so.x.x and libcamera.so.0.0 as well as  between libcamera-base.so=0.x.x
+        and libcamera-base.so.0.0. We followed the instruction from <a href="https://github.com/bluenviron/mediamtx/issues/2581#issuecomment-1804108215">here</a>.
+        In the future (>April 2024) this might cause an issue.
+    </li>
+    <li>
+
+    </li>
+</ul>
+
+    <h3>Final Steps</h3>
+    <p>
+        Your test instance is nearly working. Please do the following to verify everything is working.
+    </p>
+    <ol>
+        <li>If you haven't already, shutdown the pi with <code>sudo shutdown now</code> and connect all of your cameras. Then come back to this webpage. </li>
+        <li>If your cameras were already connected, so you skipped step 1, and you haven't restarted since the install, restart you pi. You can do this with <code>sudo reboot now</code>. Then come back to this webpage.</li>
+        <li>If all of the above is done you should see a video feed below. If you don't you might have an issue with your installation. You could try:</li>
+        <ul>
+            <li>Running <code>libcamera-hello --list</code> to make sure that your camera(s) is detected.</li>
+            <li>Verifying that your camera is totally connected correctly. If you are using an Arducam multiplexer you could verify
+                <a href="https://docs.arducam.com/Raspberry-Pi-Camera/Multi-Camera-CamArray/Quick-Start-Guide-for-Multi-Adapter-Board/"> at the Arducam quickstart guide.</a></li>
+            <li>Run <code>i2cdetect -y 1</code> if you are using a Arducam multiplexer to make sure it is detected. It should look like
+                <a href="i2c-output.png">this</a></li> if working correctly.
+            <li>Checking /home/&lt;user&gt;/remoteLabs/logs/mediamtx.log</li>
+        </ul>
+        <li>Once you have a video below, it is time to set up a lab. If you are at UCSB you just need to run
+            <code>remla setup &lt;labName&gt;.yml</code>, simply replacing &lt;labName&gt; with one of name
+            of one of the .tml files within the git repository. If you are not a at UCSB you can still try this
+            or use one of our files for inspiration. Note that the .yml file must be located in the remoteLabs folder
+            within your home directory.
+        </li>
+    </ol>
+
+
+
+    <div id="videoContainer">
+<!--        <video id="video"></video>-->
+<!--        <div id="message"></div>-->
+
+        <iframe id="video" src="http://testpi.local:8889/cam" scrolling="no"></iframe>
+    </div>
+
+
+</div>
+
+
+
+<style>
+    h1 {
+        text-align: center;
+    }
+    .content {
+        max-width: 960px;
+        margin: auto;
+    }
+   code {
+  background: #dddcdc;
+  border-radius: 10px;
+  padding: 3px 6px 3px 6px;
+  font-weight: bold;
+}
+   html, body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	font-family: 'Arial', sans-serif;
+}
+   #videoContainer {
+       display: flex;
+       position: relative;
+       justify-content: center;
+       align-items: center;
+       height: 100%;
+       margin-bottom: 50px;
+   }
+#video {
+	/*position: absolute;*/
+	/*top: 0;*/
+	/*left: 0;*/
+	width: 100%;
+	height: 100%;
+	background: rgb(30, 30, 30);
+    z-index: 1;
+}
+#message {
+	position: absolute;
+	/*left: 0;*/
+	/*top: 0;*/
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	text-align: center;
+	justify-content: center;
+	font-size: 16px;
+	font-weight: bold;
+	color: white;
+	pointer-events: none;
+	padding: 20px;
+	box-sizing: border-box;
+	text-shadow: 0 0 5px black;
+    z-index: 2;
+}
+</style>
+
+</body>
+</html>
