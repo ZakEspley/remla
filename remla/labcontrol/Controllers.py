@@ -19,37 +19,44 @@ from warnings import warn
 pi = pigpio.pi()
 gpio.setmode(gpio.BCM)
 
+
 class BaseController(object):
 
-    def cmd_handler(self, cmd, params, queue, device_name): # this should recieve a command, and a queue where it sends its response
-        
+    def __init__(self, name, deviceType, experiment):
+        self._name = name
+        self._deviceType = deviceType
+        self._experiment = experiment
+        self._state = None
+
+    def cmdHandler(self, cmd, params, queue,
+                   device_name):  # this should receive a command, and a queue where it sends its response
+
         # Aquires lock
-        self.experiment.locks[self.name].acquire()
+        lock = self._experiment.locks[self._name]
+        # Using "with" acquires the lock and releases it after the block runs out or if there is an error.
+        with lock:
 
-        # Make the parser name, it should follow the naming convention <cmd>_parser. If there is no parser return None.
-        parser = getattr(self, cmd+"_parser", None)
+            # Make the parser name, it should follow the naming convention <cmd>_parser. If there is no parser return None.
+            parser_name = f"{cmd}_parser"
+            parser = getattr(self, parser_name, None)
 
-        # If parser exists, use it to parse the params.
-        if parser is not None:
-            params = parser(params)
-        # If there is no parser print this statement for user.
-        else:
-            print("No Parser Found. Will just pass params to command.")
+            # If parser exists, use it to parse the params.
+            if parser is not None:
+                params = parser(params)
+            # If there is no parser print this statement for user.
+            else:
+                print("No Parser Found. Will just pass params to command.")
 
-        # Now get the command method. If there isn't a method, it should throw an AttributeError.
-        try:
-            method = getattr(self, cmd)
-        except:
-            print(f"{self.__class__.__name__} does not have <{cmd}> cmd")
-
-        if callable(method):
-            response = method(params)
-
-            # returns response
-            queue.put([response, device_name])
-
-        # Releases lock
-        self.experiment.locks[self.name].release()
+            # Now get the command method. If there isn't a method, it should throw an AttributeError.
+            try:
+                method = getattr(self, cmd)
+                if callable(method):
+                    response = method(params)
+                    queue.put([response, device_name])
+            except:
+                print(f"{self.__class__.__name__} does not have <{cmd}> cmd")
+            # Releases lock
+            # self._experiment.locks[self._name].release()
 
     def cleanup(self):
         pass

@@ -120,7 +120,7 @@ class Experiment(object):
         while True:
             if not q.empty():
 
-                # Grabs response and device_name from cmd_handler in controllers.py from queue
+                # Grabs response and device_name from cmdHandler in controllers.py from queue
                 response, device_name = q.get() 
                 print("RESPONSE", response)
 
@@ -187,7 +187,7 @@ class Experiment(object):
         if device_name not in self.devices:
             raise NoDeviceError(device_name)
 
-        command_thread = threading.Thread(target=self.devices[device_name].cmd_handler, args=(command, params, queue, device_name))
+        command_thread = threading.Thread(target=self.devices[device_name].cmdHandler, args=(command, params, queue, device_name))
         command_thread.start()
 
     def exit_handler(self, signal_received, frame):
