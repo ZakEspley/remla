@@ -20,6 +20,7 @@ from .customvalidators import *
 from remla import setupcmd
 import os
 from .settings import *
+from remla.yaml import yaml
 
 
 app = typer.Typer()
@@ -426,6 +427,23 @@ def updateFinalInfo(template:Path) -> str:
         content = content.replace(placeholder, replacement)
 
     return content
+
+@app.command()
+def testyaml():
+    from remla.labcontrol.Controllers import TestClass
+    thing1 = TestClass("Zak", "red", "French", "Coolio")
+    thing2 = TestClass("Dana", "green", "Spanish", "Rad")
+    devices = {"devices":[thing1,thing2]}
+    # from remla.labcontrol.testControllers import SpecificController, BaseController
+
+    # base = BaseController("something")
+    # test = SpecificController(1, "prop")
+    yaml.dump(devices, remoteLabsDirectory / "yamlTest.yml")
+
+@app.command()
+def testymlload():
+    d = yaml.load(remoteLabsDirectory/"yamlTest.yml")
+    rprint(d)
 
 #TODO: Create new command that builds a new lab.
 #TODO: Create a setup command that shifts files around

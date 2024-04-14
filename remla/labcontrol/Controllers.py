@@ -7,26 +7,67 @@ from adafruit_motor import stepper
 import RPi.GPIO as gpio
 import os
 import subprocess
-import busio
-import board
-import signal
-from adafruit_bus_device.i2c_device import I2CDevice
+import inspect
 import pigpio
 import sys
 from warnings import warn
-
+from remla.yaml import yaml
+from ruamel.yaml import yaml_object
+from abc import ABC, abstractmethod
 
 pi = pigpio.pi()
 gpio.setmode(gpio.BCM)
 
+class InitialAttributeTracker:
+    def __init__(self, name=None):
+        self.name = name
 
-class BaseController(object):
+    def __get__(self, obj, objtype=None):
+        return obj.__dict__.get(self.name)
 
-    def __init__(self, name, deviceType, experiment):
+    def __set__(self, obj, value):
+        obj.__dict__[self.name] = value
+        obj.initParameters[self.name] = value
+
+    def __delete__(self, obj):
+        obj.__dict__.pop(self.name, None)
+        obj.initParameters.pop(self.name, None)
+
+class AutoTrackMeta(type):
+    def __new__(cls, name, bases, dct):
+        # Create the class using super().
+        new_cls = super().__new__(cls, name, bases, dct)
+        # Adding AttributeTracker to all initial attributes specified in __init__
+        init_func = dct.get('__init__')
+        if init_func is None:
+            # Search in base classes
+            for base in bases:
+                if '__init__' in base.__dict__:
+                    init_func = base.__dict__['__init__']
+                    break
+        if init_func:
+            # Using signature to extract argument names
+            sig = inspect.signature(init_func)
+            for param in sig.parameters.values():
+                if param.name == 'self' or param.default is not inspect.Parameter.empty:
+                    continue
+                # Set the descriptor for handling attribute
+                setattr(new_cls, param.name, InitialAttributeTracker(param.name))
+        return new_cls
+
+
+class BaseController(ABC,metaclass=AutoTrackMeta):
+
+    def __init__(self, name):
         self._name = name
-        self._deviceType = deviceType
-        self._experiment = experiment
-        self._state = None
+        self._experiment = None
+        self._state = {}
+
+    @property
+    @abstractmethod
+    def deviceType(self):
+        """Subclasses must have a 'deviceType' class attribute"""
+        pass
 
     def cmdHandler(self, cmd, params, queue,
                    device_name):  # this should receive a command, and a queue where it sends its response
@@ -58,9 +99,11 @@ class BaseController(object):
             # Releases lock
             # self._experiment.locks[self._name].release()
 
+    @abstractmethod
     def cleanup(self):
         pass
 
+    @abstractmethod
     def reset(self):
         pass
 
@@ -69,7 +112,6 @@ class BaseController(object):
 
     def setState(self, state):
         self.state = state
-
 
 
 class PDUOutlet(dlipower.PowerSwitch, BaseController):

@@ -1,0 +1,102 @@
+from ruamel.yaml import YAML
+from pathlib import Path, PosixPath, PurePosixPath, PurePath
+from typing import List, Any
+from collections import defaultdict
+# Initialize the YAML parser
+yaml = YAML(typ='safe')
+yaml.preserve_quotes = True  # Preserve quotes style
+yaml.indent(mapping=2, sequence=4, offset=2)  # Set indentation, optional
+
+# Used to convert pathLib paths too yml files and vice versa.
+def path_representer(dumper, data):
+    return dumper.represent_scalar('!path', str(data))
+
+def path_constructor(loader, node):
+    value = loader.construct_scalar(node)
+    return Path(value)
+
+# Add the custom representer for Path objects
+for cls in [Path, PosixPath, PurePosixPath, PurePath]:
+    yaml.representer.add_representer(cls, path_representer)
+# Add the custom constructor for Path objects
+yaml.constructor.add_constructor('!path', path_constructor)
+
+
+def createDevicesFromYml(filePath: Path) -> List[Any]:
+    """
+    Create and initialize devices from a YAML configuration file.
+
+    This function reads a YAML file that defines devices and their properties,
+    including dependencies on other devices. It ensures all devices are initialized
+    in the correct order, even when some devices depend on others being created first.
+
+    :param filePath: Path to the YAML configuration file.
+    :type filePath: Path
+    :return: A list of initialized device objects.
+    :rtype: List[Any]
+    :raises ValueError: If there is a circular dependency detected among devices.
+    """
+
+    # Open and read the YAML file
+    with open(filePath, 'r') as file:
+        configData = yaml.safe_load(file)
+
+    # Extract the 'devices' section from the configuration data
+    deviceData = configData["devices"]
+
+    # Dictionary to hold name -> object mapping
+    devices = {}
+
+    # Set to track objects currently being initialized to detect circular dependencies
+    inProgress = set()
+
+    def resolveDependencies(deviceName):
+        """
+        Recursively initialize a device and its dependencies.
+
+        This internal function creates a device object by its name after resolving
+        all necessary dependencies specified in the configuration. It supports
+        recursive resolution to handle nested dependencies.
+
+        :param deviceName: The name of the device to initialize.
+        :type deviceName: str
+        :return: An initialized device object.
+        :rtype: Any
+        :raises ValueError: If circular dependencies are detected.
+        """
+        # Check if device is already created and return it
+        if deviceName in devices:
+            return devices[deviceName]
+
+        # Circular dependency check
+        if deviceName in inProgress:
+            raise ValueError(f"Circular dependency detected involving {deviceName}")
+
+        # Mark this device as being in the process of initialization
+        inProgress.add(deviceName)
+
+        # Retrieve the class type and initialization arguments for this device
+        deviceDetails = deviceData[deviceName]
+        cls = globals()[deviceDetails['type']]
+        initArgs = {k: v for k, v in deviceDetails.items() if k not in ['type', 'name']}
+
+        # Resolve dependencies for each initialization argument
+        for arg, value in initArgs.items():
+            if isinstance(value, str) and value in deviceData:
+                initArgs[arg] = resolveDependencies(value)
+
+        # Create the device instance and add to the devices dictionary
+        device = cls(name=deviceName, **initArgs)
+        devices[deviceName] = device
+
+        # Remove device from inProgress set
+        inProgress.remove(deviceName)
+
+        return device
+
+    # Initialize all devices by resolving their dependencies
+    for name in deviceData.keys():
+        if name not in devices:
+            resolveDependencies(name)
+
+    return list(devices.values())

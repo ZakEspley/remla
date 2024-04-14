@@ -1,30 +1,12 @@
 import socket
-from ruamel.yaml import YAML
-from pathlib import Path, PosixPath, PurePosixPath, PurePath
+from pathlib import Path
 import typer
 
 
 APP_NAME = "remla"
 hostname = socket.gethostname()
 packagesToCheck = ["nginx", "python3-pip", "i2c-tools", "pigpio", "python3-pigpio"]
-# Initialize the YAML parser
-yaml = YAML()
-yaml.preserve_quotes = True  # Preserve quotes style
-yaml.indent(mapping=2, sequence=4, offset=2)  # Set indentation, optional
 
-# Used to convert pathLib paths too yml files and vice versa.
-def path_representer(dumper, data):
-    return dumper.represent_scalar('!path', str(data))
-
-def path_constructor(loader, node):
-    value = loader.construct_scalar(node)
-    return Path(value)
-
-# Add the custom representer for Path objects
-for cls in [Path, PosixPath, PurePosixPath, PurePath]:
-    yaml.representer.add_representer(cls, path_representer)
-# Add the custom constructor for Path objects
-yaml.constructor.add_constructor('!path', path_constructor)
 
 
 ###### List of important paths (for now)
