@@ -1,4 +1,3 @@
-from pickle import EMPTY_DICT, TRUE
 import socket
 import sys
 import os
@@ -8,6 +7,7 @@ import json
 import logging
 import threading
 import queue
+import RPi.GPIO as gpio
 
 
 class NoDeviceError(Exception):
@@ -156,7 +156,7 @@ class Experiment(object):
         while True:
             try:
                 while True:
-                    # Recieves data
+                    # Receives data
                     data = self.connection.recv(1024)
 
                     if data:
@@ -166,7 +166,6 @@ class Experiment(object):
                     time.sleep(0.01)
             except socket.error as err:
                 logging.error("Connected Socket Error!", exc_info=True)
-                # print("Connected Socket Error: {0}".format(err))
                 return
             finally:
                 self.close_handler()
@@ -205,9 +204,8 @@ class Experiment(object):
             for device_name, device in self.devices.items():
                 logging.info("Running reset and cleanup on device " + device_name)
                 device.reset()
-                device.cleanup()
             logging.info("Everything shutdown properly. Exiting")
-
+        gpio.cleanup() # Cleans up all gpio
         exit(0)
     
     def close_handler(self):
