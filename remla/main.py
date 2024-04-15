@@ -423,7 +423,7 @@ def run(
         raise typer.Abort()
 
     remlaSettings = yaml.load(remlaSettingsPath)
-    currentLabSettingsPath = remlaSettings.["currentLab"]
+    currentLabSettingsPath = remlaSettings["currentLab"]
 
     if not currentLabSettingsPath or not currentLabSettingsPath.exists():
         alert(f"Lab settings file does not exist or no current lab configured at {currentLabSettingsPath}. Please check your settings.yml.")
