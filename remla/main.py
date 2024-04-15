@@ -178,26 +178,6 @@ def nginx():
     websiteDirectory.mkdir(parents=True, exist_ok=True)
 
     updateRemlaNginxConf(8080, hostname)
-    # Path to file in settings.
-    # nginxInitialConfPath = setupDirectory/"localhost.conf"
-    # # Read in the file
-    # with open(nginxInitialConfPath, "r") as file:
-    #     nginxInitialConf = file.read()
-    # # Use re.sub() to replace all instances of {{ settingsDirectory }} with the settingsDirectory
-    # modifiedConf = re.sub(r'\{\{\s*settingsDirectory\s*\}\}', str(settingsDirectory), nginxInitialConf)
-    # modifiedConf = re.sub(r'\{\{\s*port\s*\}\}', "8080", modifiedConf)
-    # modifiedConf = re.sub(r'\{\{\s*hostname\s*\}\}', hostname, modifiedConf)
-    #
-    #
-    # modifiedConfPath = settingsDirectory / "remla.conf"
-    # with open(modifiedConfPath, "w") as file:
-    #     file.write(modifiedConf)
-    # nginxAvailableSymPath = nginxAvailablePath / "remla.conf"
-    # if not nginxAvailableSymPath.exists():
-    #     nginxAvailableSymPath.symlink_to(modifiedConfPath)
-    # nginxEnableSymPath = nginxEnabledPath / "remla.conf"
-    # if not nginxEnableSymPath.exists():
-    #     nginxEnableSymPath.symlink_to(nginxAvailableSymPath)
 
     updatedHtml = updateFinalInfo(setupDirectory / "index.html")
     # Write the processed HTML to a new file or use as needed
@@ -428,22 +408,10 @@ def updateFinalInfo(template:Path) -> str:
 
     return content
 
-@app.command()
-def testyaml():
-    from remla.labcontrol.Controllers import TestClass
-    thing1 = TestClass("Zak", "red", "French", "Coolio")
-    thing2 = TestClass("Dana", "green", "Spanish", "Rad")
-    devices = {"devices":[thing1,thing2]}
-    # from remla.labcontrol.testControllers import SpecificController, BaseController
-
-    # base = BaseController("something")
-    # test = SpecificController(1, "prop")
-    yaml.dump(devices, remoteLabsDirectory / "yamlTest.yml")
 
 @app.command()
-def testymlload():
-    d = yaml.load(remoteLabsDirectory/"yamlTest.yml")
-    rprint(d)
+def run():
+    pass
 
 #TODO: Create new command that builds a new lab.
 #TODO: Create a setup command that shifts files around
