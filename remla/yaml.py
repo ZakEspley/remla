@@ -22,7 +22,7 @@ for cls in [Path, PosixPath, PurePosixPath, PurePath]:
 yaml.constructor.add_constructor('!path', path_constructor)
 
 
-def createDevicesFromYml(filePath: Path) -> List[Any]:
+def createDevicesFromYml(deviceData:dict) -> List[Any]:
     """
     Create and initialize devices from a YAML configuration file.
 
@@ -30,19 +30,16 @@ def createDevicesFromYml(filePath: Path) -> List[Any]:
     including dependencies on other devices. It ensures all devices are initialized
     in the correct order, even when some devices depend on others being created first.
 
-    :param filePath: Path to the YAML configuration file.
-    :type filePath: Path
+    :param deviceDict: Dictionary of device names and properties read directly from the yaml file.
+    :type deviceDict: dict
     :return: A list of initialized device objects.
     :rtype: List[Any]
     :raises ValueError: If there is a circular dependency detected among devices.
     """
 
-    # Open and read the YAML file
-    with open(filePath, 'r') as file:
-        configData = yaml.safe_load(file)
 
     # Extract the 'devices' section from the configuration data
-    deviceData = configData["devices"]
+    deviceData
 
     # Dictionary to hold name -> object mapping
     devices = {}

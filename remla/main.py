@@ -13,14 +13,15 @@ import shutil
 from pathlib import Path
 from remla.typerHelpers import *
 from remla.systemHelpers import *
-from ruamel.yaml import YAML
 import re
 from pathvalidate import ValidationError, validate_filename
 from .customvalidators import *
 from remla import setupcmd
 import os
-from .settings import *
-from remla.yaml import yaml
+from remla.settings import *
+from remla.yaml import yaml, createDevicesFromYml
+from remla.labcontrol.Experiment import Experiment
+from remla.labcontrol.Controllers import *
 
 
 app = typer.Typer()
@@ -410,8 +411,38 @@ def updateFinalInfo(template:Path) -> str:
 
 
 @app.command()
-def run():
-    pass
+def run(
+    admin: Optional[bool] = typer.Option(False, "--admin", "-a", help="Run as admin."),
+    foreground: Optional[bool] = typer.Option(False, "--foreground", "-f", help="Run in the foreground")
+):
+    remlaSettingsPath = settingsDirectory / "settings.yml"
+    # Check if the settings file exists
+    if not remlaSettingsPath.exists():
+        alert(f"Settings file not found at {remlaSettingsPath}.")
+        raise typer.Abort()
+
+    remlaSettings = yaml.load(remlaSettingsPath)
+    currentLabSettingsPath = remlaSettings.["currentLab"]
+
+    if not currentLabSettingsPath or not currentLabSettingsPath.exists():
+        alert(f"Lab settings file does not exist or no current lab configured at {currentLabSettingsPath}. Please check your settings.yml.")
+        raise typer.Abort()
+
+    labSettings = yaml.load(currentLabSettingsPath)
+    if "devices" not in labSettings:
+        alert(f"Device list not found in the lab settings file located at {currentLabSettingsPath}. Please update the file to include your list of devices.")
+        raise typer.Abort()
+
+    # Initialize devices from the lab settings
+    devices = createDevicesFromYml(labSettings["devices"])
+
+    # Create and setup the experiment
+    experiment = Experiment("RemoteLabs")
+    for device in devices:
+        experiment.addDevice(device)
+
+    # Placeholder for further experiment execution logic
+    success("Experiment setup complete.")
 
 #TODO: Create new command that builds a new lab.
 #TODO: Create a setup command that shifts files around
