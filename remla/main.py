@@ -108,6 +108,10 @@ def init():
 
     ####### Create an initial settings file #############
     _createSettingsFile()
+    ####### Create a remla.service daemon   #############
+    createServiceFile()
+    createRemalPolicy()
+
 
     interactivesetup()
 
@@ -199,12 +203,6 @@ def nginx():
     # Change Permission so NGINX can access files
     homeDirectory.chmod(0o755)
 
-@app.command()
-def setup():
-    """
-    Run this to setup a lab with YAML file and an HTML file.
-    """
-    pass
 
 @app.command()
 def interactivesetup():
@@ -411,39 +409,159 @@ def updateFinalInfo(template:Path) -> str:
     return content
 
 
-@app.command()
+@app.command("run")
+@app.command("start")
 def run(
     admin: Optional[bool] = typer.Option(False, "--admin", "-a", help="Run as admin."),
     foreground: Optional[bool] = typer.Option(False, "--foreground", "-f", help="Run in the foreground")
 ):
-    remlaSettingsPath = settingsDirectory / "settings.yml"
-    # Check if the settings file exists
-    if not remlaSettingsPath.exists():
-        alert(f"Settings file not found at {remlaSettingsPath}.")
+    if status():
+        warning("Remla is already running. If you want to restart run `remla restart`")
         raise typer.Abort()
 
-    remlaSettings = yaml.load(remlaSettingsPath)
-    currentLabSettingsPath = remlaSettings["currentLab"]
+    if not foreground:
+        try:
+            subprocess.run(["systemctl", "start", "remla.service"], check=True)
+            success("Running remla in background!")
+        except subprocess.CalledProcessError as e:
+            alert(f"Failed to start remla due to {e}")
+            raise typer.Abort()
+    else:
+        remlaSettingsPath = settingsDirectory / "settings.yml"
+        # Check if the settings file exists
+        if not remlaSettingsPath.exists():
+            alert(f"Settings file not found at {remlaSettingsPath}.")
+            raise typer.Abort()
 
-    if not currentLabSettingsPath or not currentLabSettingsPath.exists():
-        alert(f"Lab settings file does not exist or no current lab configured at {currentLabSettingsPath}. Please check your settings.yml.")
-        raise typer.Abort()
+        remlaSettings = yaml.load(remlaSettingsPath)
+        currentLabSettingsPath = remlaSettings["currentLab"]
 
-    labSettings = yaml.load(currentLabSettingsPath)
-    if "devices" not in labSettings:
-        alert(f"Device list not found in the lab settings file located at {currentLabSettingsPath}. Please update the file to include your list of devices.")
-        raise typer.Abort()
+        if not currentLabSettingsPath or not currentLabSettingsPath.exists():
+            alert(f"Lab settings file does not exist or no current lab configured at {currentLabSettingsPath}. Please check your settings.yml.")
+            raise typer.Abort()
 
-    # Initialize devices from the lab settings
-    devices = createDevicesFromYml(labSettings["devices"])
+        labSettings = yaml.load(currentLabSettingsPath)
+        if "devices" not in labSettings:
+            alert(f"Device list not found in the lab settings file located at {currentLabSettingsPath}. Please update the file to include your list of devices.")
+            raise typer.Abort()
 
-    # Create and setup the experiment
-    experiment = Experiment("RemoteLabs")
-    for device in devices:
-        experiment.addDevice(device)
+        # Initialize devices from the lab settings
+        devices = createDevicesFromYml(labSettings["devices"])
 
-    # Placeholder for further experiment execution logic
-    success("Experiment setup complete.")
+        # Create and setup the experiment
+        if admin:
+            experiment = Experiment("RemoteLabs", admin=True)
+        else:
+            experiment = Experiment("RemoteLabs")
+
+        for device in devices.values():
+            experiment.addDevice(device)
+
+        #### Now set up the locks.
+        locksConfig = labSettings.get('locks', {})
+
+        for lockGroup, deviceNames in locksConfig.items():
+            try:
+                # Convert device names to device objects
+                deviceObjects = [devices[name] for name in deviceNames if name in devices]
+
+                # In case some devices listed in YAML are not initialized or missing
+                if len(deviceObjects) != len(deviceNames):
+                    missingDevices = set(deviceNames) - set(devices.keys())
+                    alert(f"Lock group '{lockGroup}' refers to undefined devices: {missingDevices}")
+                    raise typer.Abort()
+
+                # Apply the lock to the group of device objects
+                experiment.addLock(deviceObjects)
+            except KeyError as e:
+                alert(f"Device name error in lock configuration: {str(e)}")
+                raise typer.Abort()
+
+        # Placeholder for further experiment execution logic
+        success("Experiment setup complete.")
+        experiment.setup()
+
+app.command()
+def stop():
+    try:
+        typer.echo("Stopping remla. This could take some time for the system to reset to its starting parameters. Please be patient.")
+        subprocess.run(['systemctl', 'stop', 'remla.service'], check=True)
+        success("Stopped running remla")
+    except subprocess.CalledProcessError:
+        alert("Failed to stop remla")
+
+@app.command()
+def status():
+    try:
+        # This command checks the status of the 'remla.service'
+        result = subprocess.run(['systemctl', 'is-active', 'remla.service'], text=True, check=True, stdout=subprocess.PIPE)
+        if result.stdout.strip() == 'active':
+            typer.echo("Remla service is currently running.")
+            return True
+        else:
+            typer.echo("Remla service is not running.")
+            return False
+    except subprocess.CalledProcessError:
+        alert("Failed to check Remla service status. Please ensure the service exists and you have the necessary permissions.")
+
+def createServiceFile():
+    # Finding the path to the 'remla' executable
+    executablePath = subprocess.check_output(['which', 'remla'], text=True).strip()
+    executablePath = Path(executablePath)
+    if not executablePath.exists():
+        raise FileNotFoundError("The 'remla' executable was not found in the expected path.")
+
+    # Setting the PATH environment variable
+    binPath = executablePath.parent  # Assuming the 'remla' binary's directory includes the necessary Python environment
+    user = homeDirectory.owner()
+    # Service file content
+    serviceContent = f"""
+        [Unit]
+        Description=Remla
+        After=network.target
+        
+        [Service]
+        User={user}
+        Group={user}
+        WorkingDirectory={remoteLabsDirectory}
+        ExecStart={executablePath} run
+        Restart=always
+        Environment="PATH={binPath}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+        
+        [Install]
+        WantedBy=multi-user.target
+    """
+
+    # Writing the service file
+    serviceFilePath = Path('/etc/systemd/system/remla.service')
+    serviceFilePath.write_text(serviceContent)
+
+    success(f"Service file created at {serviceFilePath}")
+def createRemalPolicy():
+    user = homeDirectory.owner()
+    #Allows remla users to run
+    policyKit = f"""[Allow Non-root Users to Manage Remla Service]
+Identity=unix-group:remlausers
+Action=org.freedesktop.systemd1.manage-units
+ResultActive=yes
+ResultInactive=yes
+ResultAny=yes
+"""
+    groupName = "remlausers"
+    with open(Path("/etc/polkit-1/localauthority/50-local.d/remla.pkla"), "w") as file:
+        file.write(policyKit)
+    try:
+        subprocess.run(['sudo', 'groupadd', groupName], check=True)
+        success(f"Group '{groupName}' created successfully.")
+    except subprocess.CalledProcessError:
+        warning(f"Failed to create group '{groupName}'. It may already exist.")
+    try:
+        subprocess.run(['sudo', 'usermod', '-a', '-G', groupName, user], check=True)
+        success(f"User '{user}' added to group '{groupName}' successfully.")
+    except subprocess.CalledProcessError:
+        warning(f"Failed to add user '{user}' to group '{groupName}'.")
+
+
 
 #TODO: Create new command that builds a new lab.
 #TODO: Create a setup command that shifts files around

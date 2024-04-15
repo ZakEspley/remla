@@ -11,7 +11,7 @@ import inspect
 import pigpio
 import sys
 from warnings import warn
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, ABCMeta
 import pyvisa as visa
 
 
@@ -56,8 +56,10 @@ class AutoTrackMeta(type):
                 setattr(new_cls, param.name, InitialAttributeTracker(param.name))
         return new_cls
 
+class CombinedMetaClass(AutoTrackMeta, ABCMeta ):
+    pass
 
-class BaseController(ABC,metaclass=AutoTrackMeta):
+class BaseController(ABC,metaclass=CombinedMetaClass):
 
     def __init__(self, name):
         self.name = name
