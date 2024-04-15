@@ -22,7 +22,7 @@ for cls in [Path, PosixPath, PurePosixPath, PurePath]:
 yaml.constructor.add_constructor('!path', path_constructor)
 
 
-def createDevicesFromYml(deviceData:dict) -> List[Any]:
+def createDevicesFromYml(deviceData:dict) -> dict[Any]:
     """
     Create and initialize devices from a YAML configuration file.
 
@@ -96,4 +96,4 @@ def createDevicesFromYml(deviceData:dict) -> List[Any]:
         if name not in devices:
             resolveDependencies(name)
 
-    return list(devices.values())
+    return devices
