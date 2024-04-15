@@ -8,159 +8,123 @@ import logging
 import threading
 import queue
 import RPi.GPIO as gpio
+from pathlib import Path
 
 
 class NoDeviceError(Exception):
 
     def __init__(self, device_name):
         self.device_name = device_name
-    
+
     def __str__(self):
         return "NoDeviceError: This experiment doesn't have a device, '{0}'".format(self.device_name)
 
 class Experiment(object):
 
-    def __init__(self, name, root_directory="remoteLabs", admin=False, messenger=False):
+    def __init__(self, name, rootDirectory="remoteLabs", admin=False, messenger=False):
         self.devices = {}
 
         # Marlon's addition
-        self.locks = {} # lock dict
-        #self.queue?    
+        self.locks = {}  # lock dict
+        # self.queue?
 
         self.allStates = {}
         if messenger:
             self.messenger = Messenger(self)
         else:
             self.messenger = None
-        self.messenger_thread = None
-        self.messenger_socket = None
-        self.socket_path = ''
+        self.messengerThread = None
+        self.messengerSocket = None
+        self.socketPath = ''
         self.socket = None
         self.connection = None
-        self.client_address = None
+        self.clientAddress = None
         self.name = name
         self.initializedStates = False
         self.admin = admin
-        self.directory = os.path.join("/home", "pi", root_directory, name)
-        self.log_name = os.path.join(self.directory, self.name+".log")
-        self.json_file = os.path.join(self.directory, self.name+".json")
-        logging.basicConfig(filename=self.log_name, level=logging.INFO, format="%(levelname)s - %(asctime)s - %(filename)s - %(funcName)s \r\n %(message)s \r\n")
+        self.directory = os.path.join("/home", "pi", rootDirectory, name)
+        self.logName = os.path.join(self.directory, self.name + ".log")
+        self.jsonFile = os.path.join(self.directory, self.name + ".json")
+        logging.basicConfig(filename=self.logName, level=logging.INFO,
+                            format="%(levelname)s - %(asctime)s - %(filename)s - %(funcName)s \r\n %(message)s \r\n")
         logging.info("""
         ##############################################################
         ####                Starting New Log                      ####
         ##############################################################    
         """)
 
-    def add_device(self, device):
+    def addDevice(self, device):
         device.experiment = self
         logging.info("Adding Device - " + device.name)
         self.devices[device.name] = device
-        #self.locks[device.name] = threading.Lock()
+        # self.locks[device.name] = threading.Lock()
 
-    """
-    Barry's note:
-    This function will assign the group of devices in the iterable
-    <devices> a single lock. All members in the iterable share a lock
-    and their cmd handlers cannot therefore be invoked concurrently.
-
-    The right way to do this is to put the devices in an experiment into
-    groups (iterables) such that the devices in each group should not be
-    invoked concurrently and call add_lock on each of the groups.
-    """
-    def add_lock(self, devices):
-        # Loops through all devices
+    def addLock(self, devices):
         lock = threading.Lock()
-        for device_name in devices:
-            self.locks[device_name.name] = lock
-            
+        for deviceName in devices:
+            self.locks[deviceName.name] = lock
 
     def recallState(self):
         logging.info("Recalling State")
-        with open(self.json_file, "r") as f:
+        with open(self.jsonFile, "r") as f:
             self.allStates = json.load(f)
         for name, device in self.devices.items():
             device.setState(self.allStates[name])
         self.initializedStates = True
-    
+
     def getControllerStates(self):
         logging.info("Getting Controller States")
         for name, device in self.devices.items():
             self.allStates[name] = device.getState()
-        with open(self.json_file, "w") as f:
+        with open(self.jsonFile, "w") as f:
             json.dump(self.allStates, f)
         self.initializedStates = True
-        
-    def set_socket_path(self, path):
-        logging.info("Setting Socket Path to " + str(path) )
-        self.socket_path = path
-    
-    def __wait_to_connect(self):
 
+    def setSocketPath(self, path):
+        logging.info("Setting Socket Path to " + str(path))
+        self.socketPath = path
+
+    def __waitToConnect(self):
         print("Experiment running... connect when ready")
         logging.info("Awaiting connection...")
         while True:
             try:
-                self.connection, self.client_address = self.socket.accept()
-                # print("Client Address is {0}".format(self.client_address))
+                self.connection, self.clientAddress = self.socket.accept()
                 logging.info("Client Connected")
-                self.__data_connection(self.connection)
+                self.__dataConnection(self.connection)
                 time.sleep(0.01)
             except socket.timeout:
                 logging.debug("Socket Timeout")
-                
                 continue
             except socket.error as err:
-                # print("Socket Error: {0}".format(err))
                 logging.error("Socket Error!", exc_info=True)
                 break
-    
-    # Takes in queue defined in data_connection
-    def response_printer(self, q): 
-        
+
+    def responsePrinter(self, q):
         while True:
             if not q.empty():
-
-                # Grabs response and device_name from cmdHandler in controllers.py from queue
-                response, device_name = q.get() 
+                response, deviceName = q.get()
                 print("RESPONSE", response)
-
                 if response is not None:
                     print("Sending data")
-                    # Carlos: comment line below and replace with your websocket sending features.
-                    # Should take the response and send it to the client.
-
-                    # Sends Response
-                    self.connection.send(response.encode()) # back to whatever sent the command to socket
-
-                #Checks State
-                self.allStates[device_name] = self.devices[device_name].getState() #returns state variable
-        
-                #These will not work on a separate thread
-                # Two devices sending data at the same time
-
-                # Dumps into json file
-                with open(self.json_file, "w") as f:
-                    json.dump(self.allStates, f)  
+                    self.connection.send(response.encode())
+                self.allStates[deviceName] = self.devices[deviceName].getState()
+                with open(self.jsonFile, "w") as f:
+                    json.dump(self.allStates, f)
             else:
                 time.sleep(0.01)
 
-    def __data_connection(self, connection):
-        # Defining queue that handles response between command_thread and response_thread
-        response_queue = queue.Queue()
-
-        #Start response handling thread 
-        response_thread = threading.Thread(target=self.response_printer, args=(response_queue, ))
-        response_thread.start()
-
+    def __dataConnection(self, connection):
+        responseQueue = queue.Queue()
+        responseThread = threading.Thread(target=self.responsePrinter, args=(responseQueue,))
+        responseThread.start()
 
         while True:
             try:
                 while True:
-                    # Receives data
                     data = self.connection.recv(1024)
-
                     if data:
-                        self.command_handler(data, response_queue) 
+                        self.commandHandler(data, responseQueue)
                     else:
                         break
                     time.sleep(0.01)
@@ -168,171 +132,84 @@ class Experiment(object):
                 logging.error("Connected Socket Error!", exc_info=True)
                 return
             finally:
-                self.close_handler()
-    
-    def device_names(self):
+                self.closeHandler()
+
+    def deviceNames(self):
         names = []
-        for device_name in self.devices:
-            names.append(device_name)
+        for deviceName in self.devices:
+            names.append(deviceName)
         return names
 
-    #Carlos: add websocket object as argument for this function
-    def command_handler(self, data, queue):
-
+    def commandHandler(self, data, queue):
         data = data.decode('utf-8')
         logging.info("Handling Command - " + data)
-        device_name, command, params = data.strip().split("/")
+        deviceName, command, params = data.strip().split("/")
         params = params.split(",")
-        if device_name not in self.devices:
-            raise NoDeviceError(device_name)
+        if deviceName not in self.devices:
+            raise NoDeviceError(deviceName)
 
-        command_thread = threading.Thread(target=self.devices[device_name].cmdHandler, args=(command, params, queue, device_name))
-        command_thread.start()
+        commandThread = threading.Thread(target=self.devices[deviceName].cmdHandler,
+                                         args=(command, params, queue, deviceName))
+        commandThread.start()
 
-    def exit_handler(self, signal_received, frame):
+    def exitHandler(self, signalReceived, frame):
         logging.info("Attempting to exit")
         if self.socket is not None:
             self.socket.close()
             logging.info("Socket is closed")
-        
-        if self.messenger_socket is not None:
-            self.messenger_socket.close()
+
+        if self.messengerSocket is not None:
+            self.messengerSocket.close()
             logging.info("Messenger socket closed")
-        
+
         if not self.admin:
             logging.info("Looping through devices shutting them down.")
-            for device_name, device in self.devices.items():
-                logging.info("Running reset and cleanup on device " + device_name)
+            for deviceName, device in self.devices.items():
+                logging.info("Running reset and cleanup on device " + deviceName)
                 device.reset()
             logging.info("Everything shutdown properly. Exiting")
-        gpio.cleanup() # Cleans up all gpio
+        gpio.cleanup()
         exit(0)
-    
-    def close_handler(self):
+
+    def closeHandler(self):
         logging.info("Client Disconnected. Handling Close.")
         if self.connection is not None:
             self.connection.close()
             logging.info("Connection to client closed.")
         if not self.admin:
-            for device_name, device in self.devices.items():
-                logging.info("Running reset on device " + device_name)
+            for deviceName, device in self.devices.items():
+                logging.info("Running reset on device " + deviceName)
                 device.reset()
-
 
     def setup(self):
         try:
-            if not self.initializedStates:   #if no historical state is being loaded
-                self.getControllerStates()   #read states of controllers and write to json file
-            if not os.path.exists(self.socket_path):
-                f = open(self.socket_path, 'w')
+            if not self.initializedStates:
+                self.getControllerStates()
+            if not os.path.exists(self.socketPath):
+                f = open(self.socketPath, 'w')
                 f.close()
-            
+
             if self.messenger is not None:
-                self.messenger_thread = threading.Thread(target=self.messenger.setup, daemon=True)
-                self.messenger_thread.start()
-            os.unlink(self.socket_path)
+                self.messengerThread = threading.Thread(target=self.messenger.setup, daemon=True)
+                self.messengerThread.start()
+            os.unlink(self.socketPath)
             self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-            signal(SIGINT, self.exit_handler)
-            self.socket.bind(self.socket_path)
+            signal(SIGINT, self.exitHandler)
+            self.socket.bind(self.socketPath)
             self.socket.listen(1)
-            self.socket.settimeout(1)
-            # Carlos to replace with his socket code (asyncio.run(main()))
-            self.__wait_to_connect()
+            self.socket.setTimeout(1)
+            self.__waitToConnect()
         except OSError:
-            if os.path.exists(self.socket_path):
-                print("Error accessing {0}\nTry running 'sudo chown pi: {0}'".format(self.socket_path))
+            if os.path.exists(self.socketPath):
+                print(f"Error accessing {self.socketPath}\nTry running 'sudo chown pi: {self.socketPath}'")
                 os._exit(0)
                 return
             else:
-                print("Socket file not found. Did you configure uv4l-uvc.conf to use {0}?".format(self.socket_path))
+                print(f"Socket file not found. Did you configure uv4l-uvc.conf to use {self.socketPath}?")
                 raise
         except socket.error as err:
             logging.error("Socket Error!", exc_info=True)
-            print("socket error: {0}".format(err))
-
-
-class Messenger:
-
-    def __init__(self, experiment):
-        self.experiment = experiment
-        self.socket_path = "/tmp/remla.socket"
-        self.socket = None
-    
-    def __wait_to_connect(self):
-
-        print("Messenger running... waiting for messages")
-        while True:
-            try:
-                self.connection, self.client_address = self.socket.accept()
-                # print("Client Address is {0}".format(self.client_address))
-                # logging.info("Client Connected")
-                self.__data_connection(self.connection)
-                time.sleep(0.01)
-            except socket.timeout:
-                logging.debug("Socket Timeout")
-                continue
-            except socket.error as err:
-                # print("Socket Error: {0}".format(err))
-                logging.error("Socket Error!", exc_info=True)
-                break
-
-    def __data_connection(self, connection):
-        while True:
-            try:
-                while True:
-                    data = self.connection.recv(1024)
-                    if data:
-                        self.experiment.connection.send(data)
-                    else:
-                        break
-                    time.sleep(0.1)
-            except socket.error as err:
-                # logging.error("Connected Socket Error!", exc_info=True)
-                print("Connected Socket Error: {0}".format(err))
-                return
-            finally:
-                self.close_handler()
-    
-    def setup(self):
-        try:
-            if not os.path.exists(self.socket_path):
-                f = open(self.socket_path, 'w')
-                f.close()
-            os.unlink(self.socket_path)
-            self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-            self.socket.bind(self.socket_path)
-            self.socket.listen(1)
-            self.socket.settimeout(1)
-            self.experiment.messenger_socket = self.socket
-            self.__wait_to_connect()
-        except OSError:
-            if os.path.exists(self.socket_path):
-                print("Error accessing {0}\nTry running 'sudo chown pi: {0}'".format(self.socket_path))
-                os._exit(0)
-                return
-            else:
-                print("Socket file not found. Did you configure uv4l-uvc.conf to use {0}?".format(self.socket_path))
-                raise
-        except socket.error as err:
-            # logging.error("Socket Error!", exc_info=True)
-            print("socket error: {0}".format(err))
-    
-    
-    def close_handler(self):
-        # logging.info("Client Disconnected. Handling Close.")
-        if self.connection is not None:
-            self.connection.close()
-            # logging.info("Connection to client closed.")
-    
-    #Carlos adds websocketCommandServer function here
-        # Add to this function counting number of connections made
-        # run the self.commandHandler method on the data/message. 
-
-    #Carlos adds runWebsocketServer "main" function here
-        # Change address of server to 0.0.0.0
-
-# Zak and Carlos learned how pull requests work
-
+            print(f"Socket error: {err}")
 
     
     
