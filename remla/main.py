@@ -23,6 +23,7 @@ from remla.settings import *
 from remla.yaml import yaml, createDevicesFromYml
 from remla.labcontrol.Experiment import Experiment
 from remla.labcontrol.Controllers import *
+import asyncio
 
 
 app = typer.Typer()
@@ -479,9 +480,9 @@ def run(
 
         # Placeholder for further experiment execution logic
         success("Experiment setup complete.")
-        experiment.setup()
+        asyncio.run(experiment.startServer())
 
-app.command()
+@app.command()
 def stop():
     try:
         typer.echo("Stopping remla. This could take some time for the system to reset to its starting parameters. Please be patient.")
@@ -489,6 +490,8 @@ def stop():
         success("Stopped running remla")
     except subprocess.CalledProcessError:
         alert("Failed to stop remla")
+
+
 
 @app.command()
 def status():
@@ -504,6 +507,21 @@ def status():
     except subprocess.CalledProcessError:
         alert("Failed to check Remla service status. Please ensure the service exists and you have the necessary permissions.")
 
+@app.command()
+def enable():
+    try:
+        subprocess.run(['systemctl', 'enable', 'remla.service'], check=True)
+        success("Remla will now run on boot.")
+    except subprocess.CalledProcessError:
+        alert("Something went wrong.")
+
+@app.command()
+def disable():
+    try:
+        subprocess.run(['systemctl', 'disable', 'remla.service'], check=True)
+        success("Remla will not run on boot.")
+    except subprocess.CalledProcessError:
+        alert("Something went wrong.")
 def createServiceFile():
     # Finding the path to the 'remla' executable
     executablePath = subprocess.check_output(['which', 'remla'], text=True).strip()

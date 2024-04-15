@@ -9,7 +9,10 @@ import threading
 import queue
 import RPi.GPIO as gpio
 from pathlib import Path
-
+import asyncio
+import websockets
+from remla.settings import *
+from collections import deque
 
 class NoDeviceError(Exception):
 
@@ -21,31 +24,24 @@ class NoDeviceError(Exception):
 
 class Experiment(object):
 
-    def __init__(self, name, rootDirectory="remoteLabs", admin=False, messenger=False):
+    def __init__(self, name, host="localhost", port=8675, admin=False):
+        self.name = name
+        self.host = host
+        self.port = port
         self.devices = {}
 
-        # Marlon's addition
-        self.locks = {}  # lock dict
-        # self.queue?
+        self.lockGroups = {}
+        self.lockMapping = {}
 
         self.allStates = {}
-        if messenger:
-            self.messenger = Messenger(self)
-        else:
-            self.messenger = None
-        self.messengerThread = None
-        self.messengerSocket = None
-        self.socketPath = ''
-        self.socket = None
-        self.connection = None
-        self.clientAddress = None
-        self.name = name
+        self.clients = deque()
+        self.activeClient = None
+
         self.initializedStates = False
         self.admin = admin
-        self.directory = os.path.join("/home", "pi", rootDirectory, name)
-        self.logName = os.path.join(self.directory, self.name + ".log")
-        self.jsonFile = os.path.join(self.directory, self.name + ".json")
-        logging.basicConfig(filename=self.logName, level=logging.INFO,
+        self.logPath = logsDirectory / f"{self.name}.log"
+        # self.jsonFile = os.path.join(self.directory, self.name + ".json")
+        logging.basicConfig(filename=self.logPath, level=logging.INFO,
                             format="%(levelname)s - %(asctime)s - %(filename)s - %(funcName)s \r\n %(message)s \r\n")
         logging.info("""
         ##############################################################
@@ -57,12 +53,13 @@ class Experiment(object):
         device.experiment = self
         logging.info("Adding Device - " + device.name)
         self.devices[device.name] = device
-        # self.locks[device.name] = threading.Lock()
 
-    def addLock(self, devices):
+
+    def addLockGroup(self, name:str, devices):
         lock = threading.Lock()
+        self.lockGroups[name] = devices
         for deviceName in devices:
-            self.locks[deviceName.name] = lock
+            self.lockMapping[deviceName.name] = name
 
     def recallState(self):
         logging.info("Recalling State")
@@ -80,59 +77,83 @@ class Experiment(object):
             json.dump(self.allStates, f)
         self.initializedStates = True
 
-    def setSocketPath(self, path):
-        logging.info("Setting Socket Path to " + str(path))
-        self.socketPath = path
 
-    def __waitToConnect(self):
-        print("Experiment running... connect when ready")
-        logging.info("Awaiting connection...")
-        while True:
-            try:
-                self.connection, self.clientAddress = self.socket.accept()
-                logging.info("Client Connected")
-                self.__dataConnection(self.connection)
-                time.sleep(0.01)
-            except socket.timeout:
-                logging.debug("Socket Timeout")
-                continue
-            except socket.error as err:
-                logging.error("Socket Error!", exc_info=True)
-                break
-
-    def responsePrinter(self, q):
-        while True:
-            if not q.empty():
-                response, deviceName = q.get()
-                print("RESPONSE", response)
-                if response is not None:
-                    print("Sending data")
-                    self.connection.send(response.encode())
-                self.allStates[deviceName] = self.devices[deviceName].getState()
-                with open(self.jsonFile, "w") as f:
-                    json.dump(self.allStates, f)
+    async def handleConnection(self, websocket, path):
+        self.clients.append(websocket)  # Track all clients by their WebSocket
+        try:
+            if self.activeClient is None and self.clients:
+                self.activeClient = websocket
+                await self.sendMessage(websocket, "You have control of the lab equipment.")
             else:
-                time.sleep(0.01)
+                await self.sendMessage(websocket, "You are connected but do not have control of the lab equipment.")
+            async for command in websocket:
+                if websocket == self.activeClient:
+                    await self.processCommand(command, websocket)
+                else:
+                    await self.sendMessage(websocket, "You do not have control to send commands.")
+        finally:
+            if websocket == self.activeClient:
+                self.activeClient = None  # Reset control if the active client disconnects
+            self.clients.pop(websocket, None)  # Remove client from tracking
 
-    def __dataConnection(self, connection):
-        responseQueue = queue.Queue()
-        responseThread = threading.Thread(target=self.responsePrinter, args=(responseQueue,))
-        responseThread.start()
+    async def processCommand(self, command, websocket):
+        logging.info("Processing Command - " + command)
+        deviceName, cmd, params = command.strip().split("/")
+        params = params.split(",")
+        if deviceName not in self.devices:
+            raise NoDeviceError(deviceName)
 
-        while True:
-            try:
-                while True:
-                    data = self.connection.recv(1024)
-                    if data:
-                        self.commandHandler(data, responseQueue)
-                    else:
-                        break
-                    time.sleep(0.01)
-            except socket.error as err:
-                logging.error("Connected Socket Error!", exc_info=True)
-                return
-            finally:
-                self.closeHandler()
+        await self.runDeviceMethod(deviceName, cmd, params, websocket)
+
+    async def runDeviceMethod(self, deviceName, method, params, websocket):
+        device = self.devices.get(deviceName)
+
+        lockGroup = self.lockMapping.get(deviceName)
+        if lockGroup:
+            with self.lockGroups[lockGroup]:
+                result = await self.runMethod(device, method, params)
+        else:
+            result = await self.runMethod(device, method, params)
+        if result is not None:
+            await self.sendMessage(websocket, f"{deviceName} - {result}")
+        else:
+            await self.sendMessage(websocket, f"{deviceName} ran {method}")
+
+    async def runMethod(self, device, method, params):
+        if hasattr(device, 'cmdHandler'):
+            func = getattr(device, 'cmdHandler')
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, func, method, params, device.name)
+            return result
+        else:
+            print(f"Device {device} does not have cmdHandler method")
+            logging.error(f"Device {device} does not have cmdHandler method")
+            raise
+
+    async def startServer(self):
+        server = websockets.serve(self.handleConnection, self.host, self.port)
+        print(f"Server started at ws://{self.host}:{self.port}")
+        logging.info(f"Server started at ws://{self.host}:{self.port}")
+        await server
+
+    async def sendDataToClient(self, websocket, dataStr:str):
+        try:
+            await websocket.send(dataStr)
+        except websockets.exceptions.ConnectionClosed:
+            logging.warning(f"Failed to send message: {dataStr} - Connection was closed.")
+            print(f"Failed to send message: {dataStr} - Connection was closed.")
+    async def sendMessage(self, websocket, message:str):
+        updatedMessage = f"MESSAGE: {message}"
+        await self.sendDataToClient(updatedMessage, websocket)
+
+    async def sendAlert(self, websocket, alertMsg:str):
+        updatedAlertMsg = f"ALERT: {alertMsg}"
+        await self.sendDataToClient(websocket, updatedAlertMsg)
+
+    async def sendCommandToClient(self, websocket, command:str):
+        updatedCommand = f"COMMAND: {command}"
+        await self.sendDataToClient(websocket, updatedCommand)
+
 
     def deviceNames(self):
         names = []
@@ -140,17 +161,26 @@ class Experiment(object):
             names.append(deviceName)
         return names
 
-    def commandHandler(self, data, queue):
-        data = data.decode('utf-8')
-        logging.info("Handling Command - " + data)
-        deviceName, command, params = data.strip().split("/")
-        params = params.split(",")
-        if deviceName not in self.devices:
-            raise NoDeviceError(deviceName)
+    async def onClientDisconnect(self, websocket):
+        # Remove client from the client queue if they disconnect
+        if websocket in self.clients:
+            self.clients.remove(websocket)
+        if websocket == self.activeClient:
+            self.activeClient = None
+            # Pass control to the next available client in the queue
+            while self.clientQueue:
+                potentialController = self.clientQueue.popleft()
+                if potentialController.open:
+                    self.activeClient = potentialController
+                    await self.sendMessage(self.activeClient, "You now have control of the lab equipment.")
+                    break
+            if not self.activeClient:
+                logging.info(f"No active clients")
+                self.activeClient = None
 
-        commandThread = threading.Thread(target=self.devices[deviceName].cmdHandler,
-                                         args=(command, params, queue, deviceName))
-        commandThread.start()
+            logging.info(f"Active client disconnected: {websocket}.")
+        else:
+            logging.info(f"Non-active client disconnected: {websocket}.")
 
     def exitHandler(self, signalReceived, frame):
         logging.info("Attempting to exit")

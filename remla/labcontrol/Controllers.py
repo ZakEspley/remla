@@ -72,35 +72,26 @@ class BaseController(ABC,metaclass=CombinedMetaClass):
         """Subclasses must have a 'deviceType' class attribute"""
         pass
 
-    def cmdHandler(self, cmd, params, queue,
-                   device_name):  # this should receive a command, and a queue where it sends its response
+    def cmdHandler(self, cmd, params, deviceName):
+        # Make the parser name, it should follow the naming convention <cmd>_parser. If there is no parser return None.
+        parser_name = f"{cmd}_parser"
+        parser = getattr(self, parser_name, None)
 
-        # Aquires lock
-        lock = self.experiment.locks[self.name]
-        # Using "with" acquires the lock and releases it after the block runs out or if there is an error.
-        with lock:
+        # If parser exists, use it to parse the params.
+        if parser is not None:
+            params = parser(params)
+        # If there is no parser print this statement for user.
+        else:
+            print("No Parser Found. Will just pass params to command.")
 
-            # Make the parser name, it should follow the naming convention <cmd>_parser. If there is no parser return None.
-            parser_name = f"{cmd}_parser"
-            parser = getattr(self, parser_name, None)
-
-            # If parser exists, use it to parse the params.
-            if parser is not None:
-                params = parser(params)
-            # If there is no parser print this statement for user.
-            else:
-                print("No Parser Found. Will just pass params to command.")
-
-            # Now get the command method. If there isn't a method, it should throw an AttributeError.
-            try:
-                method = getattr(self, cmd)
-                if callable(method):
-                    response = method(params)
-                    queue.put([response, device_name])
-            except:
-                print(f"{self.__class__.__name__} does not have <{cmd}> cmd")
-            # Releases lock
-            # self._experiment.locks[self._name].release()
+        # Now get the command method. If there isn't a method, it should throw an AttributeError.
+        try:
+            method = getattr(self, cmd)
+            if callable(method):
+                response = method(params)
+                return response
+        except:
+            print(f"{self.__class__.__name__} does not have <{cmd}> cmd")
 
 
     @abstractmethod

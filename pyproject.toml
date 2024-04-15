@@ -4,7 +4,7 @@ version = "0.1.0"
 description = ""
 authors = ["Zak Espley <zespley@gmail.com>"]
 readme = "README.md"
-include = [{path="setup", format=["sdist", "wheel"]}]
+include = ["setup/*/**"]
 
 [tool.poetry.scripts]
 remla = "remla.main:app"
