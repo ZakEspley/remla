@@ -134,7 +134,7 @@ def promptForNumericFile(prompt:str, directory:Path, pattern:str, warnMsg:str|No
     choice = IntPrompt.ask(prompt, choices=[str(i + 1) for i in range(numOfFiles)]) - 1
     return files[choice]
 
-def updateRemlaNginxConf(port: int, domain:str) -> None:
+def updateRemlaNginxConf(port: int, domain:str, wsPort:int) -> None:
     nginxInitialConfPath = setupDirectory / "localhost.conf"
     # Read in the file
     with open(nginxInitialConfPath, "r") as file:
@@ -143,6 +143,7 @@ def updateRemlaNginxConf(port: int, domain:str) -> None:
     modifiedConf = re.sub(r'\{\{\s*settingsDirectory\s*\}\}', str(settingsDirectory), nginxInitialConf)
     modifiedConf = re.sub(r'\{\{\s*port\s*\}\}', str(port), modifiedConf)
     modifiedConf = re.sub(r'\{\{\s*hostname\s*\}\}', domain, modifiedConf)
+    modifiedConf = re.sub(r'\{\{\s*wsPort\s*\}\}', str(wsPort), modifiedConf)
 
     modifiedConfPath = settingsDirectory / "remla.conf"
     with normalUserPrivileges():

@@ -5,7 +5,8 @@ import typer
 
 APP_NAME = "remla"
 hostname = socket.gethostname()
-packagesToCheck = ["nginx", "python3-pip", "i2c-tools", "pigpio", "python3-pigpio"]
+packagesToCheck = ["nginx", "python3-pip", "i2c-tools", "pigpio"]
+
 
 
 
@@ -14,11 +15,12 @@ mediaMTX_1_6_0_arm64_linux_url = "https://github.com/bluenviron/mediamtx/release
 mediamtxVersion = "1.6.0"
 mediamtxSettingsLocation = Path("/usr/local/etc")
 mediamtxBinaryLocation = Path("/usr/local/bin")
+baseDir = Path(__file__).parent
 settingsDirectory = Path(typer.get_app_dir(APP_NAME))
 logsDirectory = settingsDirectory / "logs"
 homeDirectory = Path.home()
 remoteLabsDirectory = homeDirectory / 'remla2'
-setupDirectory = Path('setup')
+setupDirectory = baseDir / "setup"
 websiteDirectory = settingsDirectory / 'website'
 nginxTemplatePath = setupDirectory / "remla.conf"
 nginxConfPath = Path("/etc/nginx/sites-available/remla.conf")

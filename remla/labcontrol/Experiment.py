@@ -79,6 +79,7 @@ class Experiment(object):
 
 
     async def handleConnection(self, websocket, path):
+        print("Connection!:", websocket, path)
         self.clients.append(websocket)  # Track all clients by their WebSocket
         try:
             if self.activeClient is None and self.clients:
@@ -94,7 +95,7 @@ class Experiment(object):
         finally:
             if websocket == self.activeClient:
                 self.activeClient = None  # Reset control if the active client disconnects
-            self.clients.pop(websocket, None)  # Remove client from tracking
+            self.clients.pop()  # Remove client from tracking
 
     async def processCommand(self, command, websocket):
         logging.info("Processing Command - " + command)
@@ -123,6 +124,7 @@ class Experiment(object):
         if hasattr(device, 'cmdHandler'):
             func = getattr(device, 'cmdHandler')
             loop = asyncio.get_running_loop()
+            print(f"Running method{method}")
             result = await loop.run_in_executor(None, func, method, params, device.name)
             return result
         else:
@@ -130,11 +132,15 @@ class Experiment(object):
             logging.error(f"Device {device} does not have cmdHandler method")
             raise
 
-    async def startServer(self):
-        server = websockets.serve(self.handleConnection, self.host, self.port)
+    def startServer(self):
+        # This function sets up and runs the WebSocket server indefinitely
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        start_server = websockets.serve(self.handleConnection, self.host, self.port)
+
         print(f"Server started at ws://{self.host}:{self.port}")
-        logging.info(f"Server started at ws://{self.host}:{self.port}")
-        await server
+        loop.run_until_complete(start_server)
+        loop.run_forever()
 
     async def sendDataToClient(self, websocket, dataStr:str):
         try:
@@ -144,7 +150,7 @@ class Experiment(object):
             print(f"Failed to send message: {dataStr} - Connection was closed.")
     async def sendMessage(self, websocket, message:str):
         updatedMessage = f"MESSAGE: {message}"
-        await self.sendDataToClient(updatedMessage, websocket)
+        await self.sendDataToClient(websocket,updatedMessage)
 
     async def sendAlert(self, websocket, alertMsg:str):
         updatedAlertMsg = f"ALERT: {alertMsg}"
@@ -240,6 +246,3 @@ class Experiment(object):
         except socket.error as err:
             logging.error("Socket Error!", exc_info=True)
             print(f"Socket error: {err}")
-
-    
-    

@@ -24,6 +24,7 @@ from remla.yaml import yaml, createDevicesFromYml
 from remla.labcontrol.Experiment import Experiment
 from remla.labcontrol.Controllers import *
 import asyncio
+import websockets
 
 
 app = typer.Typer()
@@ -115,6 +116,9 @@ def init():
 
 
     interactivesetup()
+    subprocess.run(["sudo", "systemctl", "stop", "remla.service"])
+    alert("Running test websocket server. Press Ctrl-C when you are done testing.")
+    run(wstest=True)
 
 
 
@@ -152,15 +156,23 @@ def mediamtx():
     # Change log file location in mediamtx.yml settings file.
     # Then save the new mediamtx.yml file to /usr/local/etc where mediamtx says to locate
     # the file.
-    with open(setupDirectory / "mediamtx.yml", "r") as file:
-        mediamtxSettings = yaml.load(file)
+    mediamtxSettings = yaml.load(setupDirectory / "mediamtx.yml")
     mediamtxSettings["logFile"] = str(logsDirectory / "mediamtx.log")
+    encryptionValue = mediamtxSettings["encryption"]
+    rtmpEncryptionValue = mediamtxSettings["rtmpEncryption"]
+    mediamtxSettings["encryption"] = "<replace1>"
+    mediamtxSettings["rtmpEncryption"] = "<replace2>"
     mediamtxSettingsLocation = Path("/usr/local/etc")
     (mediamtxSettingsLocation / "mediamtx.yml").unlink(missing_ok=True)
 
     mediamtxSettingsLocation.mkdir(parents=True, exist_ok=True)
-    with open(mediamtxSettingsLocation / "mediamtx.yml", "x") as file:
-        yaml.dump(mediamtxSettings, file)
+    yaml.dump(mediamtxSettings, mediamtxSettingsLocation/"mediamtx.yml")
+    with open(mediamtxSettingsLocation/"mediamtx.yml", "r") as file:
+        content = file.read()
+    content = content.replace("<replace1>", f'"{encryptionValue}"')
+    content = content.replace("<replace2>", f'"{rtmpEncryptionValue}"')
+    with open(mediamtxSettingsLocation/"mediamtx.yml", "w") as file:
+        file.write(content)
 
     # Now move mediamtx binary to /usr/local/bin where mediamtx says to move it
 
@@ -184,7 +196,7 @@ def nginx():
     # Make directory for the running website.
     websiteDirectory.mkdir(parents=True, exist_ok=True)
 
-    updateRemlaNginxConf(8080, hostname)
+    updateRemlaNginxConf(8080, hostname, 8675)
 
     updatedHtml = updateFinalInfo(setupDirectory / "index.html")
     # Write the processed HTML to a new file or use as needed
@@ -414,13 +426,22 @@ def updateFinalInfo(template:Path) -> str:
 @app.command("start")
 def run(
     admin: Optional[bool] = typer.Option(False, "--admin", "-a", help="Run as admin."),
-    foreground: Optional[bool] = typer.Option(False, "--foreground", "-f", help="Run in the foreground")
+    foreground: Optional[bool] = typer.Option(False, "--foreground", "-f", help="Run in the foreground"),
+    wstest: Optional[bool] = typer.Option(False, "--wstest", "-w", help="Runs echo test server")
 ):
     if status():
-        warning("Remla is already running. If you want to restart run `remla restart`")
+        warning("Remla is already running. If you want to restart run `remla restart` or stop before running with new options.")
         raise typer.Abort()
+    if wstest:
+        async def echo(websocket, path):
+            async for message in websocket:
+                await websocket.send(f"Message received cap'n: {message}")
 
-    if not foreground:
+        start_server = websockets.serve(echo, "localhost", 8675)
+
+        asyncio.get_event_loop().run_until_complete(start_server)
+        asyncio.get_event_loop().run_forever()
+    elif not foreground:
         try:
             subprocess.run(["systemctl", "start", "remla.service"], check=True)
             success("Running remla in background!")
@@ -435,7 +456,7 @@ def run(
             raise typer.Abort()
 
         remlaSettings = yaml.load(remlaSettingsPath)
-        currentLabSettingsPath = remlaSettings["currentLab"]
+        currentLabSettingsPath = remoteLabsDirectory / remlaSettings["currentLab"]
 
         if not currentLabSettingsPath or not currentLabSettingsPath.exists():
             alert(f"Lab settings file does not exist or no current lab configured at {currentLabSettingsPath}. Please check your settings.yml.")
@@ -480,7 +501,7 @@ def run(
 
         # Placeholder for further experiment execution logic
         success("Experiment setup complete.")
-        asyncio.run(experiment.startServer())
+        experiment.startServer()
 
 @app.command()
 def stop():
@@ -579,7 +600,45 @@ ResultAny=yes
     except subprocess.CalledProcessError:
         warning(f"Failed to add user '{user}' to group '{groupName}'.")
 
+@app.command()
+def git(giturl: Annotated[str, typer.Argument()]):
+    if not urlValidator(giturl):
+        raise typer.Abort()
+    # Parse the URL to get the path component, specifically the last part
+    repo_path = Path(giturl)
+    base_name = repo_path.name
 
+    # Remove the .git from the end if it exists
+    if base_name.endswith('.git'):
+        base_name = base_name[:-4]
+
+    # Replace any characters not allowed in directory names, if necessary
+    safe_name = re.sub(r'[^\w\-_\. ]', '_', base_name)
+    cloneDirectory = remoteLabsDirectory / safe_name
+    try:
+        cloneDirectory.mkdir(exist_ok=False)
+        subprocess.run(["git", "clone", giturl, cloneDirectory], check=True)
+        success(f"Cloned directory to here to {cloneDirectory}")
+    except FileExistsError:
+        alert(f"That git repo already has a directory in {cloneDirectory}. Rename that folder before continuing")
+        raise typer.Abort()
+    except subprocess.CalledProcessError as e:
+        alert(f"There was an issue cloning the repo:\n{e}")
+        raise typer.Abort()
+
+
+
+
+@app.command()
+def testws():
+    async def echo(websocket, path):
+        async for message in websocket:
+            await websocket.send(message)
+
+    start_server = websockets.serve(echo, "localhost", 8000)
+
+    asyncio.get_event_loop().run_until_complete(start_server)
+    asyncio.get_event_loop().run_forever()
 
 #TODO: Create new command that builds a new lab.
 #TODO: Create a setup command that shifts files around

@@ -1,11 +1,18 @@
+import typer
 from ruamel.yaml import YAML
+from ruamel.yaml.nodes import ScalarNode
 from pathlib import Path, PosixPath, PurePosixPath, PurePath
 from typing import List, Any
+from remla.labcontrol import Controllers
 from collections import defaultdict
+
+
 # Initialize the YAML parser
 yaml = YAML(typ='safe')
-yaml.preserve_quotes = True  # Preserve quotes style
+# yaml.preserve_quotes = True  # Preserve quotes style
 yaml.indent(mapping=2, sequence=4, offset=2)  # Set indentation, optional
+yaml.default_flow_style = False
+# yaml.allow_unicode = True
 
 # Used to convert pathLib paths too yml files and vice versa.
 def path_representer(dumper, data):
@@ -37,10 +44,6 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
     :raises ValueError: If there is a circular dependency detected among devices.
     """
 
-
-    # Extract the 'devices' section from the configuration data
-    deviceData
-
     # Dictionary to hold name -> object mapping
     devices = {}
 
@@ -48,6 +51,7 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
     inProgress = set()
 
     def resolveDependencies(deviceName):
+        typer.echo(f"Resolving dependency for {deviceName}")
         """
         Recursively initialize a device and its dependencies.
 
@@ -74,7 +78,9 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
 
         # Retrieve the class type and initialization arguments for this device
         deviceDetails = deviceData[deviceName]
-        cls = globals()[deviceDetails['type']]
+
+        # cls = globals()[deviceDetails['type']]
+        cls = getattr(Controllers, deviceDetails['type'])
         initArgs = {k: v for k, v in deviceDetails.items() if k not in ['type', 'name']}
 
         # Resolve dependencies for each initialization argument

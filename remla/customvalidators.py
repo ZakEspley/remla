@@ -39,6 +39,13 @@ def portValidator(port:int, alertUser:bool=True)->bool:
         warning("Ports in the range 0-1023 are typically reserved. Make sure you know what you are doing.")
     return True
 
+def urlValidator(url:str, alertUser:bool=True)->bool:
+    if validators.url(url):
+        return True
+    if alertUser:
+        alert("You did not provide a valid URL")
+    return False
+
 def uniqueValidator(items:list, invalidMsg:tuple[str,Callable[[str],None]]|None=None,
                     processMethod:Callable[[...,Any],list]|None=None, abort:bool=True) -> bool:
     if processMethod is not None:

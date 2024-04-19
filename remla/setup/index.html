@@ -31,7 +31,7 @@
         {{ mediamtxSettingsLocation }} which you shouldn't need to touch. This program
         allows us to share the Raspberry Pi Camera feed to the browser via WebRTC. (If you want to change 
         the camera settings, you can do that by editing the camera.conf file in ~/remla and then 
-        run <code>remla camera update</code>)
+        run <code>remla camera update</code> <b>This is currently not implemented</b>)
     </li>
     <li>
         It's important to note we have currently made a patch to get MediaMTX to work by creating a
@@ -67,8 +67,12 @@
             within your home directory.
         </li>
     </ol>
-
-
+<h3>WebSocket Client</h3>
+    <div class="holder">
+        <input class="textInput" type="text" id="messageInput" onkeypress="handleKeyPress(event)" placeholder="Type message here...">
+        <input class="textInput" type="text" id="responseInput" placeholder="Response will show here..." readonly>
+    </div>
+<h3>Video Feed</h3>
 
     <div id="videoContainer">
 <!--        <video id="video"></video>-->
@@ -80,6 +84,51 @@
 
 </div>
 
+
+    <script>
+        let ws;
+
+        function connectWebSocket() {
+            // Dynamically determine the host and create a WebSocket connection
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`; // Adjust the /ws if your WebSocket endpoint differs
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                console.log('WebSocket connection established');
+            };
+
+            ws.onmessage = function(event) {
+                document.getElementById('responseInput').value = event.data;
+                console.log('Message from server ', event.data);
+            };
+
+            ws.onerror = function(error) {
+                console.log('WebSocket Error: ' + error);
+            };
+
+            ws.onclose = function(e) {
+                console.log('WebSocket connection closed: ', e.reason);
+            };
+        }
+
+        function sendMessage() {
+            const message = document.getElementById('messageInput').value;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(message);
+            } else {
+                console.log('WebSocket is not connected');
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        window.onload = connectWebSocket;
+    </script>
 
 
 <style>
@@ -137,6 +186,25 @@
 	box-sizing: border-box;
 	text-shadow: 0 0 5px black;
     z-index: 2;
+}
+
+.holder {
+    display: flex;
+    width: 100%;
+    position: relative;
+    margin: 10px;
+}
+
+.textInput {
+    height: 3em;
+    border-width: 4px;
+    border-radius: 0.5em;
+    width: 100%;
+    border-style: solid;
+    border-color: black;
+    margin: 25px;
+    filter: drop-shadow(5px 5px 5px);
+    padding: 5px;
 }
 </style>
 

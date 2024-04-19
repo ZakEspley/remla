@@ -2,6 +2,7 @@ import time
 import tplink_smarthome as tp
 import dlipower
 import RPistepper as stp
+import typer
 from adafruit_motorkit import MotorKit
 from adafruit_motor import stepper
 import RPi.GPIO as gpio
@@ -62,9 +63,12 @@ class CombinedMetaClass(AutoTrackMeta, ABCMeta ):
 class BaseController(ABC,metaclass=CombinedMetaClass):
 
     def __init__(self, name):
+        self.initParameters = {}
         self.name = name
         self.experiment = None
         self.state = {}
+        typer.echo(f"Initialized {name} base controller")
+
 
     @property
     @abstractmethod
@@ -85,6 +89,7 @@ class BaseController(ABC,metaclass=CombinedMetaClass):
             print("No Parser Found. Will just pass params to command.")
 
         # Now get the command method. If there isn't a method, it should throw an AttributeError.
+        print("Command received by base sending off")
         try:
             method = getattr(self, cmd)
             if callable(method):
@@ -108,8 +113,8 @@ class BaseController(ABC,metaclass=CombinedMetaClass):
 class PDUOutlet(dlipower.PowerSwitch, BaseController):
     deviceType = "controller"
     def __init__(self, name, hostname, userid, password, timeout=None, outlets=[1,2,3,4,5,6,7,8], outletMap={}):
-        super().__init__(hostname=hostname, userid=userid, password=password, timeout=timeout)
-        super().__init__(name)
+        BaseController.__init__(self, name)
+        dlipower.PowerSwitch.__init__(self, hostname=hostname, userid=userid, password=password, timeout=timeout)
         self.experiment = None
         self.state = {1:"Off", 2:"Off", 3:"Off", 4:"Off", 5:"Off", 6:"Off", 7:"Off", 8:"Off" }
         self.outlets = outlets
@@ -271,8 +276,8 @@ class StepperI2C(MotorKit, BaseController):
             self.address=0x61
         else:
             self.address=0x60
-        super().__init__(address=self.address, steppers_microsteps=microsteps)
-        super().__init__(name)
+        MotorKit.__init__(self,address=self.address, steppers_microsteps=microsteps)
+        BaseController.__init__(self, name)
 
         self.terminal_options = {1: super().stepper1, 2: super().stepper2, 3:super().stepper1, 4:super().stepper2}
         self.refPoints = refPoints
@@ -1243,9 +1248,10 @@ class PololuDCMotor(BaseController):
 
 class ArduCamMultiCamera(BaseController):
     deviceType = "measurement"
-    def __init__(self, name, videoNumber=0, defaultSettings=None, i2cbus=11, initialCamera="a", controlPins=[4,17,18], cameraNamesDict=None):
+    def __init__(self, name, numCameras, videoNumber=0, defaultSettings=None, i2cbus=11, initialCamera="a", controlPins=[4,17,18], cameraNamesDict=None):
         super().__init__(name)
         self.videoNumber = videoNumber
+        self.numCameras = numCameras
         self.experiment = None
         self.state = {}
         self.defaultSettings = defaultSettings
@@ -1280,7 +1286,12 @@ class ArduCamMultiCamera(BaseController):
         }
 
         # Set camera for A
+        cameraNames = ["a", "b", "c", "d"]
+        for i in range(self.numCameras):
+            self.camera(cameraNames[i])
+            time.sleep(5)
         self.camera(initialCamera)
+        time.sleep(5)
 
     def camera(self, param):
         #Param should be a, b, c, d, or off
@@ -1384,6 +1395,27 @@ class HomeSwitch(BaseController):
     def reset(self):
         pass
 
+class SingleGPIO(BaseController):
+    deviceType = "controller"
+    def __init__(self, name, pin, initialState=False):
+        super().__init__(name)
+        self.pin = pin
+        gpio.setup(self.pin, gpio.OUT)
+        if initialState:
+            self.state = "off"
+            gpio.output(self.pin, gpio.HIGH)
+        else:
+            self.state = "off"
+            gpio.output(self.pin, gpio.LOW)
+
+    def on(self, params):
+        gpio.output(self.pin, gpio.HIGH)
+
+    def off(self, params):
+        gpio.output(self.pin, gpio.LOW)
+
+    def reset(self):
+        gpio.output(self.pin, gpio.LOW)
 
 class PushButton(BaseController):
     deviceType = "controller"

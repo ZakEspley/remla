@@ -13,6 +13,7 @@ logDestinations: [file]
 # If "file" is in logDestinations, this is the file which will receive the logs.
 logFile: <settingsDirectory>/logs/mediamtx.log
 
+
 # Timeout of read operations.
 readTimeout: 10s
 # Timeout of write operations.
@@ -152,7 +153,7 @@ playbackAddress: :9996
 # Global settings -> RTSP server
 
 # Enable publishing and reading streams with the RTSP protocol.
-rtsp: yes
+rtsp: no
 # List of enabled RTSP transport protocols.
 # UDP is the most performant, but doesn't work when there's a NAT/firewall between
 # server and clients, and doesn't support encryption.
@@ -192,7 +193,7 @@ rtspAuthMethods: [basic]
 # Global settings -> RTMP server
 
 # Enable publishing and reading streams with the RTMP protocol.
-rtmp: yes
+rtmp: no
 # Address of the RTMP listener. This is needed only when encryption is "no" or "optional".
 rtmpAddress: :1935
 # Encrypt connections with TLS (RTMPS).
@@ -212,9 +213,10 @@ rtmpServerCert: server.crt
 # Global settings -> HLS server
 
 # Enable reading streams with the HLS protocol.
-hls: yes
+hls: no
 # Address of the HLS listener.
-hlsAddress: :8888
+# Zak Changed
+hlsAddress: :8877
 # Enable TLS/HTTPS on the HLS server.
 # This is required for Low-Latency HLS.
 hlsEncryption: no
