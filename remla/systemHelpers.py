@@ -146,9 +146,9 @@ def updateRemlaNginxConf(port: int, domain:str, wsPort:int) -> None:
     modifiedConf = re.sub(r'\{\{\s*wsPort\s*\}\}', str(wsPort), modifiedConf)
 
     modifiedConfPath = settingsDirectory / "remla.conf"
-    with normalUserPrivileges():
-        with open(modifiedConfPath, "w") as file:
-            file.write(modifiedConf)
+    # with normalUserPrivileges():
+    with open(modifiedConfPath, "w") as file:
+        file.write(modifiedConf)
     # writeFileAsUser(modifiedConfPath, modifiedConf)
     nginxAvailableSymPath = nginxAvailablePath / "remla.conf"
     if not nginxAvailableSymPath.exists():
