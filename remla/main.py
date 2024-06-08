@@ -219,6 +219,7 @@ def nginx():
 
 @app.command()
 def interactivesetup():
+    user = homeDirectory.owner()
     message = "Note that remla currently only works with Raspberry Pi 4! If you are using a newer model, you will need do this manually."
     remlaPanel(message)
     echoResult(
@@ -311,8 +312,8 @@ def interactivesetup():
         with open(settingsDirectory/ "finalInfo.md", "w") as file:
             file.write(finalInfo)
 
-        subprocess.run(["sudo", "chown", "-R", f"{hostname}:{hostname}", f"{remoteLabsDirectory}"])
-        subprocess.run(["sudo", "chown", "-R", f"{hostname}:{hostname}", f"{settingsDirectory}"])
+        subprocess.run(["sudo", "chown", "-R", f"{user}:{user}", f"{remoteLabsDirectory}"])
+        subprocess.run(["sudo", "chown", "-R", f"{user}:{user}", f"{settingsDirectory}"])
 
         message = Text(f"You have finished installing remla, the remoteLabs control center.\n"
                        f"The next is for you to go one of:\n"
