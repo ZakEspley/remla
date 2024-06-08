@@ -114,12 +114,12 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
     deviceType = "controller"
     def __init__(self, name, hostname, userid, password, timeout=None, outlets=[1,2,3,4,5,6,7,8], outletMap={}):
         BaseController.__init__(self, name)
-        dlipower.PowerSwitch.__init__(self, hostname=hostname, userid=userid, password=password, timeout=timeout)
+        #dlipower.PowerSwitch.__init__(self, hostname=hostname, userid=userid, password=password, timeout=timeout)
         self.experiment = None
         self.state = {1:"Off", 2:"Off", 3:"Off", 4:"Off", 5:"Off", 6:"Off", 7:"Off", 8:"Off" }
         self.outlets = outlets
         self.outletMap = outletMap
-        self.login()
+        # self.login()
 
     def on(self, outletNumber):
         super().on(outletNumber)
@@ -276,13 +276,13 @@ class StepperI2C(MotorKit, BaseController):
             self.address=0x61
         else:
             self.address=0x60
-        MotorKit.__init__(self,address=self.address, steppers_microsteps=microsteps)
+        #MotorKit.__init__(self,address=self.address, steppers_microsteps=microsteps)
         BaseController.__init__(self, name)
 
-        self.terminal_options = {1: super().stepper1, 2: super().stepper2, 3:super().stepper1, 4:super().stepper2}
+        #self.terminal_options = {1: super().stepper1, 2: super().stepper2, 3:super().stepper1, 4:super().stepper2}
         self.refPoints = refPoints
         self.currentPosition = 0
-        self.device = self.terminal_options[terminal]
+        #self.device = self.terminal_options[terminal]
         self.delay = delay
         self.lowerBound = bounds[0]
         self.upperBound = bounds[1]
@@ -301,7 +301,7 @@ class StepperI2C(MotorKit, BaseController):
         self.degPerStep = degPerStep
         self.gearRatio = gearRatio
         time.sleep(0.2) # Adding this to see if it released prooperly
-        self.device.release()
+        #self.device.release()
         time.sleep(0.2) # Adding this to see if it released prooperly
 
     def setup(self, style):

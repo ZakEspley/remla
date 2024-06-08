@@ -20,6 +20,10 @@ adafruit-circuitpython-motorkit = "^1.6.14"
 python-tplink-smarthome = "^0.1.3"
 dlipower = "^1.0.176"
 websockets = "^12.0"
+validators = "^0.28.3"
+pigpio = "^1.78"
+wheel = "^0.43.0"
+setuptools = "^70.0.0"
 
 
 [build-system]
