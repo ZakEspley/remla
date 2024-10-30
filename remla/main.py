@@ -194,13 +194,13 @@ def nginx():
     logsDirectory.mkdir(parents=True, exist_ok=True)
     typer.echo("Setting up NGINX")
     # Make directory for the running website.
-    websiteDirectory.mkdir(parents=True, exist_ok=True)
+    nginxWebsitePath.mkdir(parents=True, exist_ok=True)
 
     updateRemlaNginxConf(8080, hostname, 8675)
 
     updatedHtml = updateFinalInfo(setupDirectory / "index.html")
     # Write the processed HTML to a new file or use as needed
-    with open(websiteDirectory/"index.html", 'w') as file:
+    with open(nginxWebsitePath/"index.html", 'w') as file:
         file.write(updatedHtml)
 
 
@@ -214,7 +214,7 @@ def nginx():
     subprocess.run(["sudo", "systemctl", "reload", "nginx"])
     success("NGINX setup complete.")
     # Change Permission so NGINX can access files
-    homeDirectory.chmod(0o755)
+    # homeDirectory.chmod(0o755)
 
 
 @app.command()
@@ -242,10 +242,20 @@ def interactivesetup():
 
     while True:
         numCameras = IntPrompt.ask("How many cameras will you be using?", choices=["1","2","3","4"])
-        multiplexerQuestion = "Which type of sensor are you using:\n  1. None\n  2. Arducam 2 Camera Multiplexer\n  3. Arducam 4 Camera Mutiplexer\n"
+        cameraChoices = {2:{"1":"A", "2":"B"}, 3:{"1":"A", "2":"B", "3":"C", "4":"D"}}
+        cameraPorts = []
+        newline_space = "\n "    
+        multiplexerQuestion = "Which type of multiplexer are you using:\n  1. None\n  2. Arducam 2 Camera Multiplexer\n  3. Arducam 4 Camera Mutiplexer\n"
         multiplexer = IntPrompt.ask(multiplexerQuestion, choices=["1","2","3"])
         if multiplexer==3 or numCameras <= multiplexer:
+            if multiplexer in [2,3]:
+                for i in range(numCameras):
+                    prompt = f"Which port is camera {i+1} connected to:\n {newline_space.join(f'{num}. {port}' for num, port in cameraChoices[multiplexer].items())}\n"
+                    port = IntPrompt.ask(prompt, choices=list(cameraChoices[multiplexer].keys()))
+                    cameraChoices[multiplexer].pop(str(port))
+                    cameraPorts.append(int(port)-1)
             break
+
         else:
             warning("There is a discrepancy between your multiplexer choice and the number of cameras you have.\n"
                   " You can't have more cameras than slots for cameras.\n Starting again.")
@@ -257,7 +267,7 @@ def interactivesetup():
     if multiplexer == 1:
         dtOverlayString += sensor
     else:
-        cams = ['cam'+str(i)+'-'+sensor for i in range(numCameras)]
+        cams = ['cam'+str(i)+'-'+sensor for i in cameraPorts]
         arducamString = ",".join(cams)
         dtOverlayString += f"{arducamMultiplexers[multiplexer]},{arducamString}"
 
@@ -409,7 +419,8 @@ def updateFinalInfo(template:Path) -> str:
         "{{ packagesToCheck }}": ", ".join(packagesToCheck[1:]),
         "{{ mediamtxVersion }}": mediamtxVersion,
         "{{ mediamtxBinaryLocation }}": str(mediamtxBinaryLocation),
-        "{{ mediamtxSettingsLocation }}": str(mediamtxSettingsLocation)
+        "{{ mediamtxSettingsLocation }}": str(mediamtxSettingsLocation),
+        "{{ nginxWebsitePath }}": str(nginxWebsitePath)
     }
 
     # Read the HTML template

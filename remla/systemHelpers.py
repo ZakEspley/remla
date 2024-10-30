@@ -141,6 +141,7 @@ def updateRemlaNginxConf(port: int, domain:str, wsPort:int) -> None:
         nginxInitialConf = file.read()
     # Use re.sub() to replace all instances of {{ settingsDirectory }} with the settingsDirectory
     modifiedConf = re.sub(r'\{\{\s*settingsDirectory\s*\}\}', str(settingsDirectory), nginxInitialConf)
+    modifiedConf = re.sub(r'\{\{\s*nginxWebsitePath\s*\}\}', str(nginxWebsitePath), modifiedConf)
     modifiedConf = re.sub(r'\{\{\s*port\s*\}\}', str(port), modifiedConf)
     modifiedConf = re.sub(r'\{\{\s*hostname\s*\}\}', domain, modifiedConf)
     modifiedConf = re.sub(r'\{\{\s*wsPort\s*\}\}', str(wsPort), modifiedConf)

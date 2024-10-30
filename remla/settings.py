@@ -29,3 +29,4 @@ nginxAvailablePath = Path("/etc/nginx/sites-available")
 nginxEnabledPath = Path("/etc/nginx/sites-enabled")
 localhostConfLinkPath = nginxEnabledPath / "localhost.conf"
 bootConfigPath = Path("/boot/firmware/config.txt")
+nginxWebsitePath = Path("/var/www/remla")
