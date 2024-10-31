@@ -4,6 +4,7 @@ import tarfile
 import os
 import functools
 import typer
+import sys
 
 from remla.typerHelpers import *
 from pathlib import Path
@@ -204,7 +205,7 @@ def createServiceFile(echo=False):
     # Service file content
     serviceContent = f"""
 Description=Remla
-Ater=network.target
+After=network.target
         
 [Service]
 User={user}
@@ -214,19 +215,26 @@ ExecStart={executablePath} run {"-w" if echo else ""}
 ExecStartPre=/bin/sleep 5
 Restart=always
 Environment="PATH={binPath}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
-Environment="REMLA_SYSTEMD=1"
 StandardOutput=append:/var/log/remla.log
-StandardError=append:/var/log/remla_error.log
+StandardError=append:/var/log/remla.log
+
 
 [Install]
 WantedBy=multi-user.target
-    """
+"""
 
     # Writing the service file
     serviceFilePath = Path('/etc/systemd/system/remla.service')
     serviceFilePath.write_text(serviceContent)
 
     success(f"Service file created at {serviceFilePath}")
+
+
+def cleanupPID():
+    typer.echo("Cleaning up...")
+    if os.path.exists(pidFilePath):
+        os.remove(pidFilePath)
+    sys.exit(0)
 
 # def runAsUser(nonPrivilegedUid=1000):
 #     def decoratorRunAsUser(func):

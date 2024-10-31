@@ -25,6 +25,8 @@ from remla.labcontrol.Experiment import Experiment
 from remla.labcontrol.Controllers import *
 import asyncio
 import websockets
+import datetime
+import signal
 
 
 app = typer.Typer()
@@ -441,11 +443,17 @@ def run(
     foreground: Optional[bool] = typer.Option(False, "--foreground", "-f", help="Run in the foreground"),
     wstest: Optional[bool] = typer.Option(False, "--wstest", "-w", help="Runs echo test server")
 ):
-    systemd = os.getenv("REMLA_SYSTEMD")
-    if systemd != "1":
-        if status():
-            warning("Remla is already running. If you want to restart run `remla restart` or stop before running with new options.")
-            raise typer.Abort()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print("#"*80)
+    print(f"########{now.center(64)}########")
+    print("#"*80)
+    print()
+    if status():
+        warning("Remla is already running. If you want to restart run `remla restart` or stop before running with new options.")
+        raise typer.Abort()
+    signal.signal(signal.SIGTERM, lambda signum, frame: cleanupPID())
+    signal.signal(signal.SIGINT, lambda signum, frame: cleanupPID())
+
     if wstest:
         print("Starting Echo Server")
         async def echo(websocket, path):
@@ -531,19 +539,27 @@ def stop():
 
 @app.command()
 def status():
-    try:
-        # This command checks the status of the 'remla.service'
-        result = subprocess.run(['systemctl', 'is-active', 'remla.service'], text=True, check=True, stdout=subprocess.PIPE)
-        print(result)
-        if result.stdout.strip() == 'active':
-            typer.echo("Remla service is currently running.")
-            return True
-        else:
-            typer.echo("Remla service is not running.")
-            return False
-    except subprocess.CalledProcessError:
-        alert("Failed to check Remla service status. Please ensure the service exists and you have the necessary permissions.")
-        return True
+    if os.path.exists(pidFilePath):
+        # Read exisitng pid file
+        with open(pidFilePath, 'r') as file:
+            try:
+                pid = int(file.read().strip())
+                os.kill(pid, 0)
+                typer.echo("Remla is already running")
+                return True
+            except ValueError:
+                typer.echo("PID File is corrupt. Starting a new instance.")
+            except ProcessLookupError:
+                typer.echo("Remla instance not found. Staring new isntance")
+            except PermissionError:
+                typer.echo("Permission denied when checking PID. Assuming its running.")
+                return True
+    else:
+        typer.echo("No PID file found. Starting new instance of remla")
+
+    with open(pidFilePath, "w") as file:
+        file.write(str(os.getpid()))
+    return False
 
 @app.command()
 def enable():

@@ -1,7 +1,7 @@
 import socket
 from pathlib import Path
 import typer
-
+import os
 
 APP_NAME = "remla"
 hostname = socket.gethostname()
@@ -30,3 +30,4 @@ nginxEnabledPath = Path("/etc/nginx/sites-enabled")
 localhostConfLinkPath = nginxEnabledPath / "localhost.conf"
 bootConfigPath = Path("/boot/firmware/config.txt")
 nginxWebsitePath = Path("/var/www/remla")
+pidFilePath = Path(f"/var/run/user/{os.getuid()}/remla.pid")
