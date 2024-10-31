@@ -76,10 +76,10 @@ def init():
     ####### Enable I2C #######
     remlaPanel("Turning on I2C on your raspberry pi.")
     try:
-        subprocess.run(["sudo", "raspi-config", "nonint", "do_i2c", "1"], check=True)
+        subprocess.run(["sudo", "raspi-config", "nonint", "do_i2c", "0"], check=True)
         success("Turned on I2C")
     except subprocess.CalledProcessError as e:
-        alert("Failed to turn on I2C with error {e}")
+        alert(f"Failed to turn on I2C with error {e}")
         raise typer.Abort()
 
     ####### Check to see if apt required packages are installed.  ###########
