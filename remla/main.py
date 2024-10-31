@@ -127,11 +127,18 @@ def init():
 @app.command()
 def mediamtx():
     remlaPanel("Installing MediaMTX")
-    echoResult(
-        download_and_extract_tar(mediaMTX_1_6_0_arm64_linux_url, settingsDirectory, "mediamtx"),
-        "Downloaded and extracted MediaMTX",
-        "Something went wrong in the downloading and extracting process. Check internet and try again."
-    )
+    typer.echo("  Checking for prior installation")
+    mediamtxInstalled = False
+    if os.path.exists("/usr/local/bin/mediamtx"):
+        typer.echo(" Already found Mediamtx Installation")
+        mediamtxInstalled = True
+    else:
+        echoResult(
+            download_and_extract_tar(mediaMTX_1_6_0_arm64_linux_url, settingsDirectory, "mediamtx"),
+            "Downloaded and extracted MediaMTX",
+            "Something went wrong in the downloading and extracting process. Check internet and try again."
+        )
+    typer.echo("  Creating MediaMTX Systemlinks to fix LibCameraBug")
     # Currently there is an issue in 1.6.0 where it wants to use LibCamera.0.0, but Raspberry Pi Bookworm,
     # utilizes a later version of it. So we need to create a symbolic system link between the library file
     # that mediaMTX wants to use and what is currently installed on Bookworm.
@@ -155,6 +162,7 @@ def mediamtx():
         alert("Something went wrong performing the system links")
         alert(f"{e}")
         raise typer.Abort()
+    typer.echo("  Creating MediaMTX settings file")
     # Change log file location in mediamtx.yml settings file.
     # Then save the new mediamtx.yml file to /usr/local/etc where mediamtx says to locate
     # the file.
@@ -177,8 +185,8 @@ def mediamtx():
         file.write(content)
 
     # Now move mediamtx binary to /usr/local/bin where mediamtx says to move it
-
-    moveAndOverwrite(settingsDirectory / "mediamtx/mediamtx", mediamtxBinaryLocation)
+    if not mediamtxInstalled:
+        moveAndOverwrite(settingsDirectory / "mediamtx/mediamtx", mediamtxBinaryLocation)
     # Move service file to systemd so that we can run it on boot.
     shutil.copy(setupDirectory / "mediamtx.service", "/etc/systemd/system")
 
@@ -557,7 +565,7 @@ def status():
     else:
         typer.echo("No PID file found. Starting new instance of remla")
 
-    with open(pidFilePath, "w") as file:
+    with open(pidFilePath, "w+") as file:
         file.write(str(os.getpid()))
     return False
 
