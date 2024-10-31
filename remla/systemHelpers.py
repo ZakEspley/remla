@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from typing import Callable
 from remla.customvalidators import *
 from remla.yaml import yaml
+
 def is_package_installed(package_name):
     try:
         # Attempt to show the package information
@@ -190,6 +191,42 @@ def normalUserPrivileges():
         os.setegid(original_egid)
 
 
+def createServiceFile(echo=False):
+    # Finding the path to the 'remla' executable
+    executablePath = subprocess.check_output(['which', 'remla'], text=True).strip()
+    executablePath = Path(executablePath)
+    if not executablePath.exists():
+        raise FileNotFoundError("The 'remla' executable was not found in the expected path.")
+
+    # Setting the PATH environment variable
+    binPath = executablePath.parent  # Assuming the 'remla' binary's directory includes the necessary Python environment
+    user = homeDirectory.owner()
+    # Service file content
+    serviceContent = f"""
+Description=Remla
+Ater=network.target
+        
+[Service]
+User={user}
+Group={user}
+WorkingDirectory={remoteLabsDirectory}
+ExecStart={executablePath} run {"-w" if echo else ""}
+ExecStartPre=/bin/sleep 5
+Restart=always
+Environment="PATH={binPath}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+Environment="REMLA_SYSTEMD=1"
+StandardOutput=append:/var/log/remla.log
+StandardError=append:/var/log/remla_error.log
+
+[Install]
+WantedBy=multi-user.target
+    """
+
+    # Writing the service file
+    serviceFilePath = Path('/etc/systemd/system/remla.service')
+    serviceFilePath.write_text(serviceContent)
+
+    success(f"Service file created at {serviceFilePath}")
 
 # def runAsUser(nonPrivilegedUid=1000):
 #     def decoratorRunAsUser(func):

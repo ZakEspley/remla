@@ -111,14 +111,14 @@ def init():
     ####### Create an initial settings file #############
     _createSettingsFile()
     ####### Create a remla.service daemon   #############
-    createServiceFile()
-    createRemalPolicy()
+    createServiceFile(echo=True)
+    createRemlaPolicy()
 
 
     interactivesetup()
     subprocess.run(["sudo", "systemctl", "stop", "remla.service"])
-    alert("Running test websocket server. Press Ctrl-C when you are done testing.")
-    run(wstest=True)
+    # alert("Running test websocket server. Press Ctrl-C when you are done testing.")
+    # run(wstest=True)
 
 
 
@@ -441,10 +441,13 @@ def run(
     foreground: Optional[bool] = typer.Option(False, "--foreground", "-f", help="Run in the foreground"),
     wstest: Optional[bool] = typer.Option(False, "--wstest", "-w", help="Runs echo test server")
 ):
-    if status():
-        warning("Remla is already running. If you want to restart run `remla restart` or stop before running with new options.")
-        raise typer.Abort()
+    systemd = os.getenv("REMLA_SYSTEMD")
+    if systemd != "1":
+        if status():
+            warning("Remla is already running. If you want to restart run `remla restart` or stop before running with new options.")
+            raise typer.Abort()
     if wstest:
+        print("Starting Echo Server")
         async def echo(websocket, path):
             async for message in websocket:
                 await websocket.send(f"Message received cap'n: {message}")
@@ -531,6 +534,7 @@ def status():
     try:
         # This command checks the status of the 'remla.service'
         result = subprocess.run(['systemctl', 'is-active', 'remla.service'], text=True, check=True, stdout=subprocess.PIPE)
+        print(result)
         if result.stdout.strip() == 'active':
             typer.echo("Remla service is currently running.")
             return True
@@ -539,6 +543,7 @@ def status():
             return False
     except subprocess.CalledProcessError:
         alert("Failed to check Remla service status. Please ensure the service exists and you have the necessary permissions.")
+        return True
 
 @app.command()
 def enable():
@@ -555,40 +560,8 @@ def disable():
         success("Remla will not run on boot.")
     except subprocess.CalledProcessError:
         alert("Something went wrong.")
-def createServiceFile():
-    # Finding the path to the 'remla' executable
-    executablePath = subprocess.check_output(['which', 'remla'], text=True).strip()
-    executablePath = Path(executablePath)
-    if not executablePath.exists():
-        raise FileNotFoundError("The 'remla' executable was not found in the expected path.")
 
-    # Setting the PATH environment variable
-    binPath = executablePath.parent  # Assuming the 'remla' binary's directory includes the necessary Python environment
-    user = homeDirectory.owner()
-    # Service file content
-    serviceContent = f"""
-        [Unit]
-        Description=Remla
-        After=network.target
-        
-        [Service]
-        User={user}
-        Group={user}
-        WorkingDirectory={remoteLabsDirectory}
-        ExecStart={executablePath} run
-        Restart=always
-        Environment="PATH={binPath}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
-        
-        [Install]
-        WantedBy=multi-user.target
-    """
-
-    # Writing the service file
-    serviceFilePath = Path('/etc/systemd/system/remla.service')
-    serviceFilePath.write_text(serviceContent)
-
-    success(f"Service file created at {serviceFilePath}")
-def createRemalPolicy():
+def createRemlaPolicy():
     user = homeDirectory.owner()
     #Allows remla users to run
     policyKit = f"""[Allow Non-root Users to Manage Remla Service]

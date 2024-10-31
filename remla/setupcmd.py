@@ -13,7 +13,6 @@ from typing_extensions import Annotated
 from remla.yaml import yaml
 from typing import Optional
 
-
 app = typer.Typer(no_args_is_help=False)
 
 @app.command(name="int")
@@ -117,6 +116,7 @@ def interactive():
     yaml.dump(labSettings, remoteLabsDirectory/remlaSettings["currentLab"])
 
 def _setup(labSettings:dict)->None:
+    createServiceFile()
     networkSettings = labSettings["network"]
     websiteSettings = labSettings["website"]
     updateRemlaNginxConf(networkSettings["port"], networkSettings["domain"], networkSettings["wsPort"])
