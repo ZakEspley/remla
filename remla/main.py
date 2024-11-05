@@ -18,6 +18,7 @@ import re
 from pathvalidate import ValidationError, validate_filename
 from .customvalidators import *
 from remla import setupcmd
+from remla import i2ccmd
 import os
 from remla.settings import *
 from remla.yaml import yaml, createDevicesFromYml
@@ -31,6 +32,7 @@ import signal
 
 app = typer.Typer()
 app.add_typer(setupcmd.app, name="setup")
+app.add_typer(i2ccmd.app, name="i2c")
 
 
 @app.command()
@@ -76,7 +78,7 @@ def init():
     ####### Enable I2C #######
     remlaPanel("Turning on I2C on your raspberry pi.")
     try:
-        subprocess.run(["sudo", "raspi-config", "nonint", "do_i2c", "0"], check=True)
+        subprocess.run(["sudo", "raspi-config", "nonint", "do_i2c", "0"], check=True) #0 mean true in bash I guess
         success("Turned on I2C")
     except subprocess.CalledProcessError as e:
         alert(f"Failed to turn on I2C with error {e}")
@@ -130,7 +132,7 @@ def mediamtx():
     typer.echo("  Checking for prior installation")
     mediamtxInstalled = False
     if os.path.exists("/usr/local/bin/mediamtx"):
-        typer.echo(" Already found Mediamtx Installation")
+        typer.echo("  Already found Mediamtx Installation")
         mediamtxInstalled = True
     else:
         echoResult(
@@ -547,6 +549,8 @@ def stop():
 
 @app.command()
 def status():
+    #pidFilePathFull = pidFilePath.replace("<uid>", str(getCallingUserID()))
+    print(pidFilePath)
     if os.path.exists(pidFilePath):
         # Read exisitng pid file
         with open(pidFilePath, 'r') as file:

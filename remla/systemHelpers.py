@@ -236,6 +236,22 @@ def cleanupPID():
         os.remove(pidFilePath)
     sys.exit(0)
 
+def getCallingUserID():
+    sudo_uid = os.environ.get("SUDO_UID")
+    if sudo_uid:
+        return int(sudo_uid)
+    else:
+        # If SUDO_UID is not set, fall back to the current user's ID
+        return os.getuid()
+
+def bothOrNoneAssigned(x, y):
+    if x is None and y is None:
+        return True
+    elif x is not None and y is not None:
+        return True
+    else:
+        return False
+
 # def runAsUser(nonPrivilegedUid=1000):
 #     def decoratorRunAsUser(func):
 #         @functools.wraps(func)

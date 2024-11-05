@@ -30,4 +30,4 @@ nginxEnabledPath = Path("/etc/nginx/sites-enabled")
 localhostConfLinkPath = nginxEnabledPath / "localhost.conf"
 bootConfigPath = Path("/boot/firmware/config.txt")
 nginxWebsitePath = Path("/var/www/remla")
-pidFilePath = Path(f"/var/run/user/{os.getuid()}/remla.pid")
+pidFilePath = Path(f'/var/run/user/{str(os.environ.get("SUDO_UID")) if os.environ.get("SUDO_UID") is not None else str(os.getuid())}/remla.pid')
