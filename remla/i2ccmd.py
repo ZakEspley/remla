@@ -1,18 +1,11 @@
-import shutil
-from subprocess import CalledProcessError
 from remla.labcontrol.Controllers import gpio
 import typer
-
 from remla.systemHelpers import *
-from rich import print as rprint
-from rich.prompt import Prompt, Confirm
+from rich.prompt import Prompt
 from remla.settings import *
 from remla.typerHelpers import *
-import validators
-from remla.customvalidators import domainOrHostnameValidtor, portValidator
 from remla.systemHelpers import *
 from typing_extensions import Annotated
-from remla.yaml import yaml
 from typing import Union
 import re
 
