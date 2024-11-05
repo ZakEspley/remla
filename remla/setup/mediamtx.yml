@@ -318,7 +318,7 @@ webrtcICEServers2: []
 # Global settings -> SRT server
 
 # Enable publishing and reading streams with the SRT protocol.
-srt: yes
+srt: no
 # Address of the SRT listener.
 srtAddress: :8890
 
@@ -437,9 +437,9 @@ pathDefaults:
   # ID of the camera
   rpiCameraCamID: 0
   # width of frames
-  rpiCameraWidth: 1920
+  rpiCameraWidth: 720
   # height of frames
-  rpiCameraHeight: 1080
+  rpiCameraHeight: 1280
   # flip horizontally
   rpiCameraHFlip: false
   # flip vertically
@@ -494,7 +494,7 @@ pathDefaults:
   rpiCameraProfile: main
   # H264 level
   # Zak Adjusted
-  rpiCameraLevel: '4.2'
+  rpiCameraLevel: '4.0'
   # Autofocus mode
   # values: auto, manual, continuous
   rpiCameraAfMode: continuous
