@@ -11,8 +11,8 @@ packagesToCheck = ["nginx", "python3-pip", "i2c-tools", "pigpio"]
 
 
 ###### List of important paths (for now)
-mediaMTX_1_6_0_arm64_linux_url = "https://github.com/bluenviron/mediamtx/releases/download/v1.6.0/mediamtx_v1.6.0_linux_arm64v8.tar.gz"
-mediamtxVersion = "1.6.0"
+mediaMTX_1_6_0_arm64_linux_url = "https://github.com/bluenviron/mediamtx/releases/download/v1.9.3/mediamtx_v1.9.3_linux_arm64v8.tar.gz"
+mediamtxVersion = "1.9.3"
 mediamtxSettingsLocation = Path("/usr/local/etc")
 mediamtxBinaryLocation = Path("/usr/local/bin")
 baseDir = Path(__file__).parent
