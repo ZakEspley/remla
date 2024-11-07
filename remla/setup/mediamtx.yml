@@ -437,9 +437,9 @@ pathDefaults:
   # ID of the camera
   rpiCameraCamID: 0
   # width of frames
-  rpiCameraWidth: 720
+  rpiCameraWidth: 1920
   # height of frames
-  rpiCameraHeight: 1280
+  rpiCameraHeight: 1080
   # flip horizontally
   rpiCameraHFlip: false
   # flip vertically
@@ -494,7 +494,7 @@ pathDefaults:
   rpiCameraProfile: main
   # H264 level
   # Zak Adjusted
-  rpiCameraLevel: '4.0'
+  rpiCameraLevel: '4.1'
   # Autofocus mode
   # values: auto, manual, continuous
   rpiCameraAfMode: continuous
