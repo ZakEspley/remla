@@ -136,34 +136,11 @@ def mediamtx():
         mediamtxInstalled = True
     else:
         echoResult(
-            download_and_extract_tar(mediaMTX_1_6_0_arm64_linux_url, settingsDirectory, "mediamtx"),
+            download_and_extract_tar(mediaMTX_tar_file, settingsDirectory, "mediamtx"),
             "Downloaded and extracted MediaMTX",
             "Something went wrong in the downloading and extracting process. Check internet and try again."
         )
     typer.echo("  Creating MediaMTX Systemlinks to fix LibCameraBug")
-    # Currently there is an issue in 1.6.0 where it wants to use LibCamera.0.0, but Raspberry Pi Bookworm,
-    # utilizes a later version of it. So we need to create a symbolic system link between the library file
-    # that mediaMTX wants to use and what is currently installed on Bookworm.
-    # TODO: Remove symbolic links whenever mediaMTX updates libcamera drivers.
-    # Start by getting the version of libcamera that is currently in bookworm and then
-    # doing a systemlink to LibCamera.0.0
-    libraryDirectory = Path("/lib/aarch64-linux-gnu")
-    mediamtxLibCamera = libraryDirectory / "libcamera.so.0.0"
-    mediamtxLibCameraBase = libraryDirectory / "libcamera-base.so.0.0"
-    mediamtxLibCamera.unlink(missing_ok=True)
-    mediamtxLibCameraBase.unlink(missing_ok=True)
-    libcameraLibraryInstalledPath = Path(checkFileFullName(libraryDirectory, "libcamera.so*"))
-    libcameraBaseLibraryInstalledPath = Path(checkFileFullName(libraryDirectory, "libcamera-base.so*"))
-    if not libcameraBaseLibraryInstalledPath or not libcameraLibraryInstalledPath:
-        alert("Could not identify files")
-        raise typer.Abort()
-    try:
-        (libraryDirectory / "libcamera.so.0.0").symlink_to(libcameraLibraryInstalledPath)
-        (libraryDirectory / "libcamera-base.so.0.0").symlink_to(libcameraBaseLibraryInstalledPath)
-    except Exception as e:
-        alert("Something went wrong performing the system links")
-        alert(f"{e}")
-        raise typer.Abort()
     typer.echo("  Creating MediaMTX settings file")
     # Change log file location in mediamtx.yml settings file.
     # Then save the new mediamtx.yml file to /usr/local/etc where mediamtx says to locate
