@@ -23,7 +23,7 @@ def echoResult(result, goodMessage, badMessage=None):
     else:
         if badMessage is not None:
             alert(badMessage)
-        raise typer.Abort
+        raise typer.Abort()
 
 def panelDisplay(message:str, **kwargs):
     panel  = Panel(message, expand=False, **kwargs)

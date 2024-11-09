@@ -204,6 +204,7 @@ def createServiceFile(echo=False):
     user = homeDirectory.owner()
     # Service file content
     serviceContent = f"""
+[Unit]
 Description=Remla
 After=network.target
         

@@ -7,6 +7,7 @@ from rich.prompt import Prompt, IntPrompt
 from rich import print as rprint
 from rich.text import Text
 from rich.markdown import Markdown
+from remla import settings
 import typer
 from typing_extensions import Annotated
 from typing import Optional
@@ -73,6 +74,10 @@ def init():
     settingsDirectory.mkdir(parents=True, exist_ok=True)
     logsDirectory.mkdir(parents=True, exist_ok=True)
     websiteDirectory.mkdir(parents=True, exist_ok=True)
+    websiteStaticDirectory.mkdir(parents=True, exist_ok=True)
+    websiteJSDirectory.mkdir(parents=True, exist_ok=True)
+    websiteCSSDirectory.mkdir(parents=True, exist_ok=True)
+    websiteImgsDirectory.mkdir(parents=True, exist_ok=True)
     remoteLabsDirectory.mkdir(parents=True, exist_ok=True)
 
     ####### Enable I2C #######
@@ -118,9 +123,10 @@ def init():
     createServiceFile(echo=True)
     createRemlaPolicy()
 
-
     interactivesetup()
-    subprocess.run(["sudo", "systemctl", "stop", "remla.service"])
+    subprocess.run(["sudo", "systemctl", "daemon-reload"])
+    subprocess.run(["sudo", "systemctl", "restart", "remla.service"])
+    enable_service("remla")
     # alert("Running test websocket server. Press Ctrl-C when you are done testing.")
     # run(wstest=True)
 
@@ -180,19 +186,24 @@ def mediamtx():
 
 @app.command()
 def nginx():
+
     logsDirectory.mkdir(parents=True, exist_ok=True)
     typer.echo("Setting up NGINX")
     # Make directory for the running website.
-    nginxWebsitePath.mkdir(parents=True, exist_ok=True)
+    #nginxWebsitePath.mkdir(parents=True, exist_ok=True)
+    
+    shutil.copy(setupDirectory / "reader.js", websiteJSDirectory)
+    shutil.copy(setupDirectory / "mediaMTXGetFeed.js", websiteJSDirectory)
+
 
     updateRemlaNginxConf(8080, hostname, 8675)
 
     updatedHtml = updateFinalInfo(setupDirectory / "index.html")
     # Write the processed HTML to a new file or use as needed
-    with open(nginxWebsitePath/"index.html", 'w') as file:
+    with open(websiteDirectory/"index.html", 'w') as file:
         file.write(updatedHtml)
 
-
+    shutil.copytree(websiteDirectory, nginxWebsitePath, dirs_exist_ok=True)
 
     typer.echo("Making NGINX run at boot")
     echoResult(
@@ -211,11 +222,10 @@ def interactivesetup():
     user = homeDirectory.owner()
     message = "Note that remla currently only works with Raspberry Pi 4! If you are using a newer model, you will need do this manually."
     remlaPanel(message)
-    echoResult(
-        typer.confirm("Do you want to continue with interactive install?", default="y"),
-        "Continuing with installation",
-        "Ending installation process."
-    )
+    cont_int, = typer.confirm("Do you want to continue with interactive install?", default="y"),
+    print(cont_int)
+    if not cont_int:
+        return
     allowedSensors = ["ov5647", "imx219", "imx477", "imx708", "imx519", "other"]
     sensorQuestionString = f"Select which type of sensor you will be using [1-5]:\n"
     for i, sensor in enumerate(allowedSensors):

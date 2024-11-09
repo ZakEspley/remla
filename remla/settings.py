@@ -31,3 +31,7 @@ localhostConfLinkPath = nginxEnabledPath / "localhost.conf"
 bootConfigPath = Path("/boot/firmware/config.txt")
 nginxWebsitePath = Path("/var/www/remla")
 pidFilePath = Path(f'/var/run/user/{str(os.environ.get("SUDO_UID")) if os.environ.get("SUDO_UID") is not None else str(os.getuid())}/remla.pid')
+websiteStaticDirectory = websiteDirectory / "static"
+websiteJSDirectory = websiteStaticDirectory / "js"
+websiteCSSDirectory = websiteStaticDirectory / "css"
+websiteImgsDirectory = websiteStaticDirectory / "imgs"

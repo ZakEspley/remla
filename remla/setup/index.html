@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -5,44 +6,12 @@
           content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>Remote Labs</title>
+    <script defer src="/static/js/reader.js"></script>
+    <script defer src="/static/js/mediaMTXGetFeed.js"></script>
 </head>
 <body>
 <div class="content">
     <h1>Remote Labs</h1>
-    <h3>Install Information</h3>
-<ul>
-    <li>
-        We put a folder called {{ remoteLabsDirectory }}. Here is where you will put your lab
-        configuration files and your websites for interacting with equipment.
-    </li>
-    <li>
-        We created a remla folder in {{ settingsDirectory }}. This is mostly for remla's use, and you won't
-        need to interact with it much. You will be able to find logs for mediamtx and nginx there if you
-        should need to look at those.
-    </li>
-    <li>
-        We turned on i2c for you. This is necessary if you are using an Arducam hat. If you'd like to turn it off,
-        run <code>sudo rasp-config</code> and turn it off through the interface options menu.
-    </li>
-    <li>We made sure you had the dependent programs installed. Namely: {{ packagesToCheck }}</li>
-    <li>
-        We then downloaded <a href="https://github.com/bluenviron/mediamtx">MediaMTX</a> {{ mediamtxVersion }}
-        and moved the binary file to {{ mediamtxBinaryLocation }} and the settings file to
-        {{ mediamtxSettingsLocation }} which you shouldn't need to touch. This program
-        allows us to share the Raspberry Pi Camera feed to the browser via WebRTC. (If you want to change 
-        the camera settings, you can do that by editing the camera.conf file in ~/remla and then 
-        run <code>remla camera update</code> <b>This is currently not implemented</b>)
-    </li>
-    <li>
-        It's important to note we have currently made a patch to get MediaMTX to work by creating a
-        system link between libcamera.so.x.x and libcamera.so.0.0 as well as  between libcamera-base.so=0.x.x
-        and libcamera-base.so.0.0. We followed the instruction from <a href="https://github.com/bluenviron/mediamtx/issues/2581#issuecomment-1804108215">here</a>.
-        In the future (>April 2024) this might cause an issue.
-    </li>
-    <li>
-
-    </li>
-</ul>
 
     <h3>Final Steps</h3>
     <p>
@@ -67,6 +36,35 @@
             within your home directory.
         </li>
     </ol>
+    <h3>Install Information</h3>
+<ul>
+    <li>
+        We put a folder called {{ remoteLabsDirectory }}. Here is where you will put your lab
+        configuration files and your websites for interacting with equipment.
+    </li>
+    <li>
+        We created a remla folder in {{ settingsDirectory }}. This is mostly for remla's use, and you won't
+        need to interact with it much. You will be able to find logs for mediamtx and nginx there if you
+        should need to look at those.
+    </li>
+    <li>
+        We turned on i2c for you. This is necessary if you are using an Arducam hat. If you'd like to turn it off,
+        run <code>sudo rasp-config</code> and turn it off through the interface options menu. If you are using an
+	Arudcam Multicamera Adapter Board you will need to leave on i2c.
+    </li>
+    <li>We made sure you had the dependent programs installed. Namely: {{ packagesToCheck }}</li>
+    <li>
+        We then downloaded <a href="https://github.com/bluenviron/mediamtx">MediaMTX</a> {{ mediamtxVersion }}
+        and moved the binary file to {{ mediamtxBinaryLocation }} and the settings file to
+        {{ mediamtxSettingsLocation }} which you shouldn't need to touch. This program
+        allows us to share the Raspberry Pi Camera feed to the browser via WebRTC. (If you want to change 
+        the camera settings, you can do that by editing the camera.conf file in ~/remla and then 
+        run <code>remla camera update</code> <b>This is currently not implemented</b>)
+    </li>
+    <li>
+
+    </li>
+</ul>
 <h3>WebSocket Client</h3>
     <div class="holder">
         <input class="textInput" type="text" id="messageInput" onkeypress="handleKeyPress(event)" placeholder="Type message here...">
@@ -75,10 +73,9 @@
 <h3>Video Feed</h3>
 
     <div id="videoContainer">
-<!--        <video id="video"></video>-->
-<!--        <div id="message"></div>-->
-
-        <iframe id="video" src="http://testpi.local:8889/cam" scrolling="no"></iframe>
+        <video id="video"></video>
+        <div id="message"></div>
+<!-- TODO: Make video file stuff here copying reader_index.html from MediaMTX -->
     </div>
 
 
