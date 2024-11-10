@@ -28,7 +28,7 @@ const parseBoolString = (str, defaultVal) => {
 const loadAttributesFromQuery = () => {
 
   const params = new URLSearchParams(window.location.search);
-  video.controls = parseBoolString(params.get('controls'), true);
+  video.controls = parseBoolString(params.get('controls'), false);
   video.muted = parseBoolString(params.get('muted'), true);
   video.autoplay = parseBoolString(params.get('autoplay'), true);
   video.playsInline = parseBoolString(params.get('playsinline'), true);

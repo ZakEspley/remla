@@ -124,6 +124,7 @@ def init():
     createRemlaPolicy()
 
     interactivesetup()
+    typer.echo("Wrapping up install...")
     subprocess.run(["sudo", "systemctl", "daemon-reload"])
     subprocess.run(["sudo", "systemctl", "restart", "remla.service"])
     enable_service("remla")
@@ -223,7 +224,6 @@ def interactivesetup():
     message = "Note that remla currently only works with Raspberry Pi 4! If you are using a newer model, you will need do this manually."
     remlaPanel(message)
     cont_int, = typer.confirm("Do you want to continue with interactive install?", default="y"),
-    print(cont_int)
     if not cont_int:
         return
     allowedSensors = ["ov5647", "imx219", "imx477", "imx708", "imx519", "other"]

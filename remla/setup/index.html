@@ -19,7 +19,7 @@
     </p>
     <ol>
         <li>If you haven't already, shutdown the pi with <code>sudo shutdown now</code> and connect all of your cameras. Then come back to this webpage. </li>
-        <li>If your cameras were already connected, so you skipped step 1, and you haven't restarted since the install, restart you pi. You can do this with <code>sudo reboot now</code>. Then come back to this webpage.</li>
+        <li>If your cameras were already connected, so you skipped step 1, and you haven't restarted since the install, restart you pi. You can do this with <code>sudo reboot</code>. Then come back to this webpage.</li>
         <li>If all of the above is done you should see a video feed below. If you don't you might have an issue with your installation. You could try:</li>
         <ul>
             <li>Running <code>libcamera-hello --list</code> to make sure that your camera(s) is detected.</li>
@@ -31,7 +31,7 @@
         </ul>
         <li>Once you have a video below, it is time to set up a lab. If you are at UCSB you just need to run
             <code>remla setup &lt;labName&gt;.yml</code>, simply replacing &lt;labName&gt; with one of name
-            of one of the .tml files within the git repository. If you are not a at UCSB you can still try this
+            of one of the .yml files within the git repository. If you are not a at UCSB you can still try this
             or use one of our files for inspiration. Note that the .yml file must be located in the remoteLabs folder
             within your home directory.
         </li>
@@ -39,7 +39,7 @@
     <h3>Install Information</h3>
 <ul>
     <li>
-        We put a folder called {{ remoteLabsDirectory }}. Here is where you will put your lab
+        We put a folder called {{ remoteLabsDirectory }} in your home directory. Here is where you will put your lab
         configuration files and your websites for interacting with equipment.
     </li>
     <li>
@@ -73,7 +73,7 @@
 <h3>Video Feed</h3>
 
     <div id="videoContainer">
-        <video id="video"></video>
+        <video id="video" controls="false" autoplay="true"></video>
         <div id="message"></div>
 <!-- TODO: Make video file stuff here copying reader_index.html from MediaMTX -->
     </div>
