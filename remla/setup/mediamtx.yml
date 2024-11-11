@@ -489,7 +489,7 @@ pathDefaults:
   rpiCameraIDRPeriod: 60
   # bitrate
   # Zak Adjusted
-  rpiCameraBitrate: 24000000
+  rpiCameraBitrate: 5000000
   # H264 profile
   rpiCameraProfile: main
   # H264 level
