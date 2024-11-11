@@ -98,10 +98,12 @@ class Experiment(object):
             self.clients.pop()  # Remove client from tracking
 
     async def processCommand(self, command, websocket):
+        print(f"Processing Command {command} from {websocket}")
         logging.info("Processing Command - " + command)
         deviceName, cmd, params = command.strip().split("/")
         params = params.split(",")
         if deviceName not in self.devices:
+            print("Raising no device error")
             raise NoDeviceError(deviceName)
 
         await self.runDeviceMethod(deviceName, cmd, params, websocket)
@@ -111,20 +113,28 @@ class Experiment(object):
 
         lockGroup = self.lockMapping.get(deviceName)
         if lockGroup:
+            print("Locak group true")
             with self.lockGroups[lockGroup]:
+                print("lock group pre result")
                 result = await self.runMethod(device, method, params)
+                print(f"Lock group result {result}")
         else:
+            print("No lockgroup")
             result = await self.runMethod(device, method, params)
+            print(f"No lockgroup result: {result}")
         if result is not None:
             await self.sendMessage(websocket, f"{deviceName} - {result}")
         else:
             await self.sendMessage(websocket, f"{deviceName} ran {method}")
 
     async def runMethod(self, device, method, params):
+        print("Running method")
         if hasattr(device, 'cmdHandler'):
+            print(f"Device has cmdHandler {getattr(device, 'cmdHandler')}")
             func = getattr(device, 'cmdHandler')
+            print(f"Got Commmand handler: {func}")
             loop = asyncio.get_running_loop()
-            print(f"Running method{method}")
+            print(f"Running method {method} on the {device}")
             result = await loop.run_in_executor(None, func, method, params, device.name)
             return result
         else:

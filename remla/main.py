@@ -469,6 +469,8 @@ def run(
             alert(f"Failed to start remla due to {e}")
             raise typer.Abort()
     else:
+        print("Starting remla websocket server")
+        typer.echo("Echo above statment")
         remlaSettingsPath = settingsDirectory / "settings.yml"
         # Check if the settings file exists
         if not remlaSettingsPath.exists():
@@ -489,7 +491,7 @@ def run(
 
         # Initialize devices from the lab settings
         devices = createDevicesFromYml(labSettings["devices"])
-
+        print("Using devices:", labSettings["devices"])
         # Create and setup the experiment
         if admin:
             experiment = Experiment("RemoteLabs", admin=True)
@@ -501,7 +503,7 @@ def run(
 
         #### Now set up the locks.
         locksConfig = labSettings.get('locks', {})
-
+        
         for lockGroup, deviceNames in locksConfig.items():
             try:
                 # Convert device names to device objects
@@ -518,7 +520,6 @@ def run(
             except KeyError as e:
                 alert(f"Device name error in lock configuration: {str(e)}")
                 raise typer.Abort()
-
         # Placeholder for further experiment execution logic
         success("Experiment setup complete.")
         experiment.startServer()

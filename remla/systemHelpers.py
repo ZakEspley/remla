@@ -212,7 +212,7 @@ After=network.target
 User={user}
 Group={user}
 WorkingDirectory={remoteLabsDirectory}
-ExecStart={executablePath} run {"-w" if echo else ""}
+ExecStart={executablePath} run {"-w" if echo else ""} -f
 ExecStartPre=/bin/sleep 5
 Restart=always
 Environment="PATH={binPath}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
@@ -227,8 +227,11 @@ WantedBy=multi-user.target
     # Writing the service file
     serviceFilePath = Path('/etc/systemd/system/remla.service')
     serviceFilePath.write_text(serviceContent)
-
-    success(f"Service file created at {serviceFilePath}")
+    try:
+        subprocess.run(["sudo", "systemctl", "daemon-reload"], check=True)
+        success(f"Service file created at {serviceFilePath}")
+    except subprocess.SubprocessError:
+        alert("Could not restart remla daemon.")
 
 
 def cleanupPID():

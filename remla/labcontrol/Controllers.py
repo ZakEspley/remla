@@ -25,6 +25,7 @@ class InitialAttributeTracker:
         self.name = name
 
     def __get__(self, obj, objtype=None):
+        print(f"Getting Called")
         return obj.__dict__.get(self.name)
 
     def __set__(self, obj, value):
@@ -92,6 +93,7 @@ class BaseController(ABC,metaclass=CombinedMetaClass):
         print("Command received by base sending off")
         try:
             method = getattr(self, cmd)
+            print(method)
             if callable(method):
                 response = method(params)
                 return response
@@ -114,7 +116,7 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
     deviceType = "controller"
     def __init__(self, name, hostname, userid, password, timeout=None, outlets=[1,2,3,4,5,6,7,8], outletMap={}):
         BaseController.__init__(self, name)
-        #dlipower.PowerSwitch.__init__(self, hostname=hostname, userid=userid, password=password, timeout=timeout)
+        dlipower.PowerSwitch.__init__(self, hostname=hostname, userid=userid, password=password, timeout=timeout)
         self.experiment = None
         self.state = {1:"Off", 2:"Off", 3:"Off", 4:"Off", 5:"Off", 6:"Off", 7:"Off", 8:"Off" }
         self.outlets = outlets
@@ -1286,11 +1288,14 @@ class ArduCamMultiCamera(BaseController):
         }
 
         # Set camera for A
-        cameraNames = ["a", "b", "c", "d"]
+        _cameraNames = ["a", "b", "c", "d"]
         for i in range(self.numCameras):
-            self.camera(cameraNames[i])
+            self.camera(_cameraNames[i])
             time.sleep(5)
-        self.camera(initialCamera)
+        if initialCamera in _cameraNames:
+            self.camera(initialCamera)
+        else:
+            self.cameraName(initialCamera)
         time.sleep(5)
 
     def camera(self, param):
@@ -1875,7 +1880,7 @@ class GeneralPWMServo(BaseController):
             pi -- any(None): the host Rpi pigpio.pi instance. Default None
                 will use the local host pi.
         """
-        self.name = name
+        super().__init__(name)
         self.PWM = PWM
         if not pi:
             self.pi = pigpio.pi()

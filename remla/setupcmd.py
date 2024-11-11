@@ -81,7 +81,6 @@ def interactive():
         websiteSettings["index"] = indexSelection.relative_to(remoteLabsDirectory)
 
 
-
     commonStaticFolderDesire = Confirm.ask("Do you have a common static folder for all your websites?", default=False)
     commonStaticUpdate = False
     if commonStaticFolderDesire:
@@ -116,7 +115,7 @@ def interactive():
     yaml.dump(labSettings, remoteLabsDirectory/remlaSettings["currentLab"])
 
 def _setup(labSettings:dict)->None:
-    createServiceFile()
+    createServiceFile(False)
     networkSettings = labSettings["network"]
     websiteSettings = labSettings["website"]
     updateRemlaNginxConf(networkSettings["port"], networkSettings["domain"], networkSettings["wsPort"])
@@ -126,7 +125,11 @@ def _setup(labSettings:dict)->None:
         shutil.copytree(remoteLabsDirectory / "static", websiteDirectory / "static", dirs_exist_ok=True)
     if websiteSettings["staticFolder"] is not None:
         shutil.copytree(remoteLabsDirectory/websiteSettings["staticFolder"], websiteDirectory / "static", dirs_exist_ok=True)
+    requiredFiles = ["reader.js", "mediaMTXGetFeed.js", "remlaSocket.js"]
+    for file in requiredFiles:
+        shutil.copy(setupDirectory / file, websiteJSDirectory)
 
+    shutil.copytree(websiteDirectory, nginxWebsitePath, dirs_exist_ok=True)
 
 @app.command()
 def lab(labfile: Annotated[str, typer.Argument()],
