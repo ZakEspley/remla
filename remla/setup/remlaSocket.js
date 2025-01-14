@@ -2,10 +2,11 @@
 (function() {
     function getWebSocketUrl() {
         const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-        const hostname = window.location.href;
+        const hostname = window.location.hostname;
+        const pathname = window.location.pathname;
         const port = window.location.port ? `:${window.location.port}` : '';
-        const wsPath = '/ws';
-        return `${protocol}${hostname}${port}${wsPath}`;
+        const wsPath = 'ws';
+        return `${protocol}${hostname}${port}${pathname}${wsPath}`;
     }
 
     // Establish the WebSocket connection
