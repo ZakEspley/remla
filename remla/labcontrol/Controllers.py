@@ -1083,8 +1083,8 @@ class Keithley6514Electrometer(BaseController):
         self.inst = visaManager.open_resource(
             f"ASRL/dev/ttyUSB{self.usbAddress}::INSTR", baud_rate=19200
         )
-        self.inst.read_termination("\r\n")
-        self.inst.write_termination("\r\n")
+        self.inst.read_termination = "\r\n"
+        self.inst.write_termination = "\r\n"
 
     def press(self, params):
         self.inst.write("SYST:REM")
@@ -1110,8 +1110,8 @@ class Keithley2000Multimeter(BaseController):
         self.inst = visaManager.open_resource(
             f"ASRL/dev/ttyUSB{self.usbAddress}::INSTR", baud_rate=19200
         )
-        self.inst.read_termination("\r\n")
-        self.inst.write_termination("\r\n")
+        self.inst.read_termination = "\r\n"
+        self.inst.write_termination = "\r\n"
 
     def press(self, params):
         self.inst.write("SYST:REM")
