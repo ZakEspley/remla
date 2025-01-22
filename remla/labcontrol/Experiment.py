@@ -1,29 +1,29 @@
-import socket
-import sys
-import os
-import time
-from signal import signal, SIGINT
+import asyncio
 import json
 import logging
+import os
+import socket
 import threading
-import queue
-import RPi.GPIO as gpio
-from pathlib import Path
-import asyncio
-import websockets
-from remla.settings import *
 from collections import deque
+from signal import SIGINT, signal
+
+import RPi.GPIO as gpio
+import websockets
+
+from remla.settings import *
+
 
 class NoDeviceError(Exception):
-
     def __init__(self, device_name):
         self.device_name = device_name
 
     def __str__(self):
-        return "NoDeviceError: This experiment doesn't have a device, '{0}'".format(self.device_name)
+        return "NoDeviceError: This experiment doesn't have a device, '{0}'".format(
+            self.device_name
+        )
+
 
 class Experiment(object):
-
     def __init__(self, name, host="localhost", port=8675, admin=False):
         self.name = name
         self.host = host
@@ -41,8 +41,11 @@ class Experiment(object):
         self.admin = admin
         self.logPath = logsDirectory / f"{self.name}.log"
         # self.jsonFile = os.path.join(self.directory, self.name + ".json")
-        logging.basicConfig(filename=self.logPath, level=logging.INFO,
-                            format="%(levelname)s - %(asctime)s - %(filename)s - %(funcName)s \r\n %(message)s \r\n")
+        logging.basicConfig(
+            filename=self.logPath,
+            level=logging.INFO,
+            format="%(levelname)s - %(asctime)s - %(filename)s - %(funcName)s \r\n %(message)s \r\n",
+        )
         logging.info("""
         ##############################################################
         ####                Starting New Log                      ####
@@ -54,12 +57,11 @@ class Experiment(object):
         logging.info("Adding Device - " + device.name)
         self.devices[device.name] = device
 
-
-    def addLockGroup(self, name:str, devices):
+    def addLockGroup(self, name: str, devices):
         lock = threading.Lock()
         self.lockGroups[name] = devices
         for deviceName in devices:
-            self.lockMapping[deviceName.name] = name
+            self.lockMapping[deviceName.name] = lock
 
     def recallState(self):
         logging.info("Recalling State")
@@ -77,24 +79,32 @@ class Experiment(object):
             json.dump(self.allStates, f)
         self.initializedStates = True
 
-
     async def handleConnection(self, websocket, path):
         print("Connection!:", websocket, path)
         self.clients.append(websocket)  # Track all clients by their WebSocket
         try:
             if self.activeClient is None and self.clients:
                 self.activeClient = websocket
-                await self.sendMessage(websocket, "You have control of the lab equipment.")
+                await self.sendMessage(
+                    websocket, "You have control of the lab equipment."
+                )
             else:
-                await self.sendMessage(websocket, "You are connected but do not have control of the lab equipment.")
+                await self.sendMessage(
+                    websocket,
+                    "You are connected but do not have control of the lab equipment.",
+                )
             async for command in websocket:
                 if websocket == self.activeClient:
                     await self.processCommand(command, websocket)
                 else:
-                    await self.sendMessage(websocket, "You do not have control to send commands.")
+                    await self.sendMessage(
+                        websocket, "You do not have control to send commands."
+                    )
         finally:
             if websocket == self.activeClient:
-                self.activeClient = None  # Reset control if the active client disconnects
+                self.activeClient = (
+                    None  # Reset control if the active client disconnects
+                )
             self.clients.pop()  # Remove client from tracking
 
     async def processCommand(self, command, websocket):
@@ -129,9 +139,9 @@ class Experiment(object):
 
     async def runMethod(self, device, method, params):
         print("Running method")
-        if hasattr(device, 'cmdHandler'):
+        if hasattr(device, "cmdHandler"):
             print(f"Device has cmdHandler {getattr(device, 'cmdHandler')}")
-            func = getattr(device, 'cmdHandler')
+            func = getattr(device, "cmdHandler")
             print(f"Got Commmand handler: {func}")
             loop = asyncio.get_running_loop()
             print(f"Running method {method} on the {device}")
@@ -152,24 +162,26 @@ class Experiment(object):
         loop.run_until_complete(start_server)
         loop.run_forever()
 
-    async def sendDataToClient(self, websocket, dataStr:str):
+    async def sendDataToClient(self, websocket, dataStr: str):
         try:
             await websocket.send(dataStr)
         except websockets.exceptions.ConnectionClosed:
-            logging.warning(f"Failed to send message: {dataStr} - Connection was closed.")
+            logging.warning(
+                f"Failed to send message: {dataStr} - Connection was closed."
+            )
             print(f"Failed to send message: {dataStr} - Connection was closed.")
-    async def sendMessage(self, websocket, message:str):
-        updatedMessage = f"MESSAGE: {message}"
-        await self.sendDataToClient(websocket,updatedMessage)
 
-    async def sendAlert(self, websocket, alertMsg:str):
+    async def sendMessage(self, websocket, message: str):
+        updatedMessage = f"MESSAGE: {message}"
+        await self.sendDataToClient(websocket, updatedMessage)
+
+    async def sendAlert(self, websocket, alertMsg: str):
         updatedAlertMsg = f"ALERT: {alertMsg}"
         await self.sendDataToClient(websocket, updatedAlertMsg)
 
-    async def sendCommandToClient(self, websocket, command:str):
+    async def sendCommandToClient(self, websocket, command: str):
         updatedCommand = f"COMMAND: {command}"
         await self.sendDataToClient(websocket, updatedCommand)
-
 
     def deviceNames(self):
         names = []
@@ -188,10 +200,12 @@ class Experiment(object):
                 potentialController = self.clientQueue.popleft()
                 if potentialController.open:
                     self.activeClient = potentialController
-                    await self.sendMessage(self.activeClient, "You now have control of the lab equipment.")
+                    await self.sendMessage(
+                        self.activeClient, "You now have control of the lab equipment."
+                    )
                     break
             if not self.activeClient:
-                logging.info(f"No active clients")
+                logging.info("No active clients")
                 self.activeClient = None
 
             logging.info(f"Active client disconnected: {websocket}.")
@@ -232,11 +246,13 @@ class Experiment(object):
             if not self.initializedStates:
                 self.getControllerStates()
             if not os.path.exists(self.socketPath):
-                f = open(self.socketPath, 'w')
+                f = open(self.socketPath, "w")
                 f.close()
 
             if self.messenger is not None:
-                self.messengerThread = threading.Thread(target=self.messenger.setup, daemon=True)
+                self.messengerThread = threading.Thread(
+                    target=self.messenger.setup, daemon=True
+                )
                 self.messengerThread.start()
             os.unlink(self.socketPath)
             self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -247,11 +263,15 @@ class Experiment(object):
             self.__waitToConnect()
         except OSError:
             if os.path.exists(self.socketPath):
-                print(f"Error accessing {self.socketPath}\nTry running 'sudo chown pi: {self.socketPath}'")
+                print(
+                    f"Error accessing {self.socketPath}\nTry running 'sudo chown pi: {self.socketPath}'"
+                )
                 os._exit(0)
                 return
             else:
-                print(f"Socket file not found. Did you configure uv4l-uvc.conf to use {self.socketPath}?")
+                print(
+                    f"Socket file not found. Did you configure uv4l-uvc.conf to use {self.socketPath}?"
+                )
                 raise
         except socket.error as err:
             logging.error("Socket Error!", exc_info=True)

@@ -576,7 +576,7 @@ def run(
                     raise typer.Abort()
 
                 # Apply the lock to the group of device objects
-                experiment.addLock(deviceObjects)
+                experiment.addLockGroup(lockGroup, deviceObjects)
             except KeyError as e:
                 alert(f"Device name error in lock configuration: {str(e)}")
                 raise typer.Abort()
