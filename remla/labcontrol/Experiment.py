@@ -58,10 +58,10 @@ class Experiment(object):
         self.devices[device.name] = device
 
     def addLockGroup(self, name: str, devices):
-        lock = threading.Lock()
+        # lock = threading.Lock()
         self.lockGroups[name] = devices
         for deviceName in devices:
-            self.lockMapping[deviceName.name] = lock
+            self.lockMapping[deviceName.name] = name
 
     def recallState(self):
         logging.info("Recalling State")
