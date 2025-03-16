@@ -92,15 +92,15 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
             print("No Parser Found. Will just pass params to command.")
 
         # Now get the command method. If there isn't a method, it should throw an AttributeError.
-        print("Command received by base sending off")
         try:
             method = getattr(self, cmd)
             print(method)
             if callable(method):
                 response = method(params)
                 return response
-        except:
+        except Exception as e:
             print(f"{self.__class__.__name__} does not have <{cmd}> cmd")
+            raise e
 
     @abstractmethod
     def reset(self):
@@ -337,13 +337,18 @@ class StepperI2C(MotorKit, BaseController):
             self.address = 0x61
         else:
             self.address = 0x60
-        # MotorKit.__init__(self,address=self.address, steppers_microsteps=microsteps)
+        MotorKit.__init__(self, address=self.address, steppers_microsteps=microsteps)
         BaseController.__init__(self, name)
 
-        # self.terminal_options = {1: super().stepper1, 2: super().stepper2, 3:super().stepper1, 4:super().stepper2}
+        self.terminal_options = {
+            1: super().stepper1,
+            2: super().stepper2,
+            3: super().stepper1,
+            4: super().stepper2,
+        }
         self.refPoints = refPoints
         self.currentPosition = 0
-        # self.device = self.terminal_options[terminal]
+        self.device = self.terminal_options[terminal]
         self.delay = delay
         self.lowerBound = bounds[0]
         self.upperBound = bounds[1]
@@ -362,7 +367,7 @@ class StepperI2C(MotorKit, BaseController):
         self.degPerStep = degPerStep
         self.gearRatio = gearRatio
         time.sleep(0.2)  # Adding this to see if it released prooperly
-        # self.device.release()
+        self.device.release()
         time.sleep(0.2)  # Adding this to see if it released prooperly
 
     def setup(self, style):

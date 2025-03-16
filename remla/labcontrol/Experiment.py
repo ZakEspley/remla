@@ -64,6 +64,10 @@ class Experiment(object):
         ##############################################################    
         """)
 
+    def logException(self, task):
+        if task.exception():
+            logging.exception("Unknown Exception: %s", task.exception())
+
     def addDevice(self, device):
         device.experiment = self
         logging.info("Adding Device - " + device.name)
@@ -107,7 +111,8 @@ class Experiment(object):
                 )
             async for command in websocket:
                 if websocket == self.activeClient:
-                    asyncio.create_task(self.processCommand(command, websocket))
+                    task = asyncio.create_task(self.processCommand(command, websocket))
+                    task.add_done_callback(self.logException)
                 else:
                     asyncio.create_task(
                         self.sendMessage(
@@ -117,7 +122,8 @@ class Experiment(object):
         finally:
             if websocket == self.activeClient:
                 self.clients.pop()  # Remove client from tracking
-                self.activeClient = self.clients[0] if len(self.clients) > 0 else None
+                # self.activeClient = self.clients[0] if len(self.clients) > 0 else None
+                self.activeClient = None
 
     async def processCommand(self, command, websocket):
         print(f"Processing Command {command} from {websocket}")
@@ -202,6 +208,7 @@ class Experiment(object):
                     )
                     break
             if not self.activeClient:
+                print("No active clients")
                 logging.info("No active clients")
                 self.activeClient = None
 
