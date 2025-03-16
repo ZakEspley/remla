@@ -5,6 +5,7 @@ import os
 import socket
 import threading
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from signal import SIGINT, signal
 
 import RPi.GPIO as gpio
@@ -23,6 +24,16 @@ class NoDeviceError(Exception):
         )
 
 
+def runMethod(device, method, params):
+    if hasattr(device, "cmdHandler"):
+        func = getattr(device, "cmdHandler")
+        result = func(method, params, device.name)
+        return result
+    else:
+        logging.error(f"Device {device} does not have a cmdHandler method")
+        raise
+
+
 class Experiment(object):
     def __init__(self, name, host="localhost", port=8675, admin=False):
         self.name = name
@@ -39,6 +50,7 @@ class Experiment(object):
 
         self.initializedStates = False
         self.admin = admin
+        self.executor = ThreadPoolExecutor(max_workers=4)
         self.logPath = logsDirectory / f"{self.name}.log"
         # self.jsonFile = os.path.join(self.directory, self.name + ".json")
         logging.basicConfig(
@@ -58,10 +70,10 @@ class Experiment(object):
         self.devices[device.name] = device
 
     def addLockGroup(self, name: str, devices):
-        # lock = threading.Lock()
-        self.lockGroups[name] = devices
-        for deviceName in devices:
-            self.lockMapping[deviceName.name] = name
+        lock = asyncio.Lock()
+        self.lockGroups[name] = lock
+        for device in devices:
+            self.lockMapping[device.name] = name
 
     def recallState(self):
         logging.info("Recalling State")
@@ -95,17 +107,17 @@ class Experiment(object):
                 )
             async for command in websocket:
                 if websocket == self.activeClient:
-                    await self.processCommand(command, websocket)
+                    asyncio.create_task(self.processCommand(command, websocket))
                 else:
-                    await self.sendMessage(
-                        websocket, "You do not have control to send commands."
+                    asyncio.create_task(
+                        self.sendMessage(
+                            websocket, "You do not have control to send commands."
+                        )
                     )
         finally:
             if websocket == self.activeClient:
-                self.activeClient = (
-                    None  # Reset control if the active client disconnects
-                )
-            self.clients.pop()  # Remove client from tracking
+                self.clients.pop()  # Remove client from tracking
+                self.activeClient = self.clients[0] if len(self.clients) > 0 else None
 
     async def processCommand(self, command, websocket):
         print(f"Processing Command {command} from {websocket}")
@@ -121,36 +133,21 @@ class Experiment(object):
     async def runDeviceMethod(self, deviceName, method, params, websocket):
         device = self.devices.get(deviceName)
 
-        lockGroup = self.lockMapping.get(deviceName)
-        if lockGroup:
-            print("Locak group true")
-            with self.lockGroups[lockGroup]:
-                print("lock group pre result")
-                result = await self.runMethod(device, method, params)
-                print(f"Lock group result {result}")
+        lockGroupName = self.lockMapping.get(deviceName)
+        if lockGroupName:
+            async with self.lockGroups[lockGroupName]:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    self.executor, runMethod, device, method, params
+                )
         else:
-            print("No lockgroup")
-            result = await self.runMethod(device, method, params)
-            print(f"No lockgroup result: {result}")
+            logging.error("All devices need a lock")
+            raise
+            # result = await self.runMethod(device, method, params)
         if result is not None:
             await self.sendMessage(websocket, f"{deviceName} - {result}")
         else:
             await self.sendMessage(websocket, f"{deviceName} ran {method}")
-
-    async def runMethod(self, device, method, params):
-        print("Running method")
-        if hasattr(device, "cmdHandler"):
-            print(f"Device has cmdHandler {getattr(device, 'cmdHandler')}")
-            func = getattr(device, "cmdHandler")
-            print(f"Got Commmand handler: {func}")
-            loop = asyncio.get_running_loop()
-            print(f"Running method {method} on the {device}")
-            result = await loop.run_in_executor(None, func, method, params, device.name)
-            return result
-        else:
-            print(f"Device {device} does not have cmdHandler method")
-            logging.error(f"Device {device} does not have cmdHandler method")
-            raise
 
     def startServer(self):
         # This function sets up and runs the WebSocket server indefinitely
