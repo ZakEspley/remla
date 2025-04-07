@@ -434,6 +434,8 @@ pathDefaults:
 
   # ID of the camera
   rpiCameraCamID: 0
+  # Resolution of raw frames
+  rpiCameraMode: '2592:1944'
   # width of frames
   rpiCameraWidth: 1920
   # height of frames
