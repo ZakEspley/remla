@@ -482,7 +482,6 @@ pathDefaults:
   rpiCameraTuningFile:
   # sensor mode, in format [width]:[height]:[bit-depth]:[packing]
   # bit-depth and packing are optional.
-  rpiCameraMode:
   # frames per second
   rpiCameraFPS: 30
   # period between IDR frames
