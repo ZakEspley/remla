@@ -1,18 +1,3 @@
-const video = document.getElementById('video');
-
-const message = document.getElementById('message');
-let defaultControls = false;
-
-const setMessage = (str) => {
-  if (str !== '') {
-    video.controls = false;
-  } else {
-    video.controls = defaultControls;
-  }
-  message.innerText = str;
-
-};
-
 const parseBoolString = (str, defaultVal) => {
   str = (str || '');
 
@@ -25,20 +10,32 @@ const parseBoolString = (str, defaultVal) => {
   return defaultVal;
 };
 
-const loadAttributesFromQuery = () => {
-
-  const params = new URLSearchParams(window.location.search);
-  video.controls = parseBoolString(params.get('controls'), false);
-  video.muted = parseBoolString(params.get('muted'), true);
-  video.autoplay = parseBoolString(params.get('autoplay'), true);
-  video.playsInline = parseBoolString(params.get('playsinline'), true);
-
-  defaultControls = video.controls;
-};
 
 
 window.addEventListener('DOMContentLoaded', () => {
+
+  let defaultControls = false;
+  const video = document.getElementById('video');
+  const message = document.getElementById('message');
   loadAttributesFromQuery();
+  const setMessage = (str) => {
+    if (str !== '') {
+      video.controls = false;
+    } else {
+      video.controls = defaultControls;
+    }
+    message.innerText = str;
+  };
+
+  const loadAttributesFromQuery = () => {
+    const params = new URLSearchParams(window.location.search);
+    video.controls = parseBoolString(params.get('controls'), false);
+    video.muted = parseBoolString(params.get('muted'), true);
+    video.autoplay = parseBoolString(params.get('autoplay'), true);
+    video.playsInline = parseBoolString(params.get('playsinline'), true);
+
+    defaultControls = video.controls;
+  };
 
   new MediaMTXWebRTCReader({
     url: new URL('whep', window.location.href) + window.location.search,

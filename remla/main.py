@@ -1,5 +1,3 @@
-#!/home/remoteLabs/.cache/pypoetry/virtualenvs/remla-BlFEVOYb-py3.11/bin/python
-
 import asyncio
 import datetime
 import os
@@ -29,7 +27,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.1.9a1"
+__version__ = "0.2.1"
 
 
 def version_callback(value: bool):
