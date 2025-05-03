@@ -17,7 +17,6 @@ window.addEventListener('DOMContentLoaded', () => {
   let defaultControls = false;
   const video = document.getElementById('video');
   const message = document.getElementById('message');
-  loadAttributesFromQuery();
   const setMessage = (str) => {
     if (str !== '') {
       video.controls = false;
@@ -37,6 +36,7 @@ window.addEventListener('DOMContentLoaded', () => {
     defaultControls = video.controls;
   };
 
+  loadAttributesFromQuery();
   new MediaMTXWebRTCReader({
     url: new URL('whep', window.location.href) + window.location.search,
     onError: (err) => {
