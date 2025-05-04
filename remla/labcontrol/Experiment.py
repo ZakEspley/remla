@@ -120,19 +120,23 @@ class Experiment(object):
                         )
                     )
         finally:
-            self.clients.remove(websocket) # Remove client that closed connection 
-            if websocket == self.activeClient:   # if the removed client was the active client
-                self.activeClient = self.clients[0] if len(self.clients) > 0 else None   #set the first client in the list to be the new active client
-                await self.sendMessage(
-                   self.activeClient, "You are the new active client."
-                )
+            self.clients.remove(websocket)  # Remove client that closed connection
+            if (
+                websocket == self.activeClient
+            ):  # if the removed client was the active client
+                self.activeClient = (
+                    self.clients[0] if len(self.clients) > 0 else None
+                )  # set the first client in the list to be the new active client
+                if self.activeClient is not None:
+                    await self.sendMessage(
+                        self.activeClient, "You are the new active client."
+                    )
                 print("the first client has changed!")
                 logging.info("Looping through devices - resetting them.")
                 for deviceName, device in self.devices.items():
                     logging.info("Running reset and cleanup on device " + deviceName)
                     device.reset()
                 logging.info("Everything reset properly!")
-
 
     async def processCommand(self, command, websocket):
         print(f"Processing Command {command} from {websocket}")
