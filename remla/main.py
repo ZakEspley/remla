@@ -27,7 +27,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.2.2.1"
+__version__ = "0.2.4"
 
 
 def version_callback(value: bool):
@@ -663,6 +663,27 @@ ResultAny=yes
         success(f"User '{user}' added to group '{groupName}' successfully.")
     except subprocess.CalledProcessError:
         warning(f"Failed to add user '{user}' to group '{groupName}'.")
+
+
+@app.command()
+def upgrade(
+    pipx_home: Annotated[str, typer.Argument()] = "/opt/pipx",
+    pipx_bin: Annotated[str, typer.Argument()] = "/usr/local/bin",
+):
+    try:
+        subprocess.run(
+            [
+                "sudo",
+                f"PIPX_HOME={pipx_home}",
+                f"PIPX_BIN={pipx_bin}",
+                "pipx",
+                "upgrade",
+                "remla",
+            ],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        alert(f"Unable to upgrade do to:\n{e}")
 
 
 @app.command()
