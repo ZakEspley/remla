@@ -167,6 +167,8 @@ class Experiment(object):
             raise
             # result = await self.runMethod(device, method, params)
         if result is not None:
+            logging.info(f"Device {deviceName} ran {method} with result: {result}")
+            print(result)
             if result[0] == "ALERT":
                 await self.sendAlert(websocket, f"{result[1]}")
             else:

@@ -3,3 +3,7 @@
 /lib
 /.idea
 .idea
+*.pyc
+__pycache__
+*.pyo
+*.pyd
