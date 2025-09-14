@@ -3,6 +3,7 @@ on:
     tags:
       - "*.*.*"
       - "*.*.*.dev*"
+      - "*.*.*.post*
 permissions:
   contents: read
 
