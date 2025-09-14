@@ -63,6 +63,9 @@ class Experiment(object):
         ####                Starting New Log                      ####
         ##############################################################    
         """)
+        self.startIpcListener()
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
 
     def logException(self, task):
         if task.exception():
@@ -156,7 +159,7 @@ class Experiment(object):
         if lockGroupName:
             async with self.lockGroups[lockGroupName]:
                 loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
+                response_type,result = await loop.run_in_executor(
                     self.executor, runMethod, device, method, params
                 )
         else:
@@ -164,19 +167,22 @@ class Experiment(object):
             raise
             # result = await self.runMethod(device, method, params)
         if result is not None:
-            await self.sendMessage(websocket, f"{deviceName} - {result}")
+            if result[0] == "ALERT":
+                await self.sendAlert(websocket, f"{result[1]}")
+            else:
+                await self.sendMessage(websocket, f"{result[1]}")
         else:
             await self.sendMessage(websocket, f"{deviceName} ran {method}")
 
     def startServer(self):
         # This function sets up and runs the WebSocket server indefinitely
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
         start_server = websockets.serve(self.handleConnection, self.host, self.port)
 
         print(f"Server started at ws://{self.host}:{self.port}")
-        loop.run_until_complete(start_server)
-        loop.run_forever()
+        self.loop.run_until_complete(start_server)
+        self.loop.run_forever()
 
     async def sendDataToClient(self, websocket, dataStr: str):
         try:
@@ -290,6 +296,33 @@ class Experiment(object):
                     f"Socket file not found. Did you configure uv4l-uvc.conf to use {self.socketPath}?"
                 )
                 raise
-        except socket.error as err:
             logging.error("Socket Error!", exc_info=True)
             print(f"Socket error: {err}")
+
+    def startIpcListener(self, ipc_path="/tmp/remla_cmd.sock"):
+        # Remove old socket if exists
+        if os.path.exists(ipc_path):
+            os.unlink(ipc_path)
+        ipc_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        ipc_sock.bind(ipc_path)
+        ipc_sock.listen(1)
+        print(f"IPC listener started at {ipc_path}")
+
+        def ipc_loop():
+            while True:
+                conn, _ = ipc_sock.accept()
+                data = conn.recv(1024).decode().strip()
+                if data == "boot":
+                    # Send boot message to active client
+                    if self.activeClient:
+                        future = asyncio.run_coroutine_threadsafe(
+                            self.sendMessage(self.activeClient, "Experiment/message/boot"),
+                            self.loop
+                        )
+                        print("Sent boot message to active client.")
+                    else:
+                        print("No active client to send boot message.")
+                conn.close()
+
+
+        threading.Thread(target=ipc_loop, daemon=True).start()

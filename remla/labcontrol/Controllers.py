@@ -391,9 +391,9 @@ class StepperI2C(MotorKit, BaseController):
                     if status == gpio.HIGH:
                         response = switch.switchAction(self, steps - i)
                         if response is None:
-                            return "{0}/{1}/{2}".format(self.name, "position", "limit")
+                            return ("ALERT", "{0}/{1}/{2}".format(self.name, "position", "limit"))
                         else:
-                            return response
+                            return ("MESSAGE", response)
 
             if self.homing:
                 homeStatus = self.homeSwitch.getStatus(1)
@@ -410,9 +410,9 @@ class StepperI2C(MotorKit, BaseController):
             self.currentPosition == self.upperBound
             or self.currentPosition == self.lowerBound
         ):
-            return "{0}/{1}/{2}".format(self.name, "position", "limit")
+            return ("ALERT", "{0}/{1}/{2}".format(self.name, "position", "limit"))
         else:
-            return "{0}/{1}/{2}".format(self.name, "position", self.currentPosition)
+            return ("MESSAGE", "{0}/{1}/{2}".format(self.name, "position", self.currentPosition))
 
     def move_parser(self, params):
         if len(params) != 1:
@@ -439,13 +439,13 @@ class StepperI2C(MotorKit, BaseController):
         print(position)
         endPoint = self.refPoints[position]
         response = self.move(endPoint - self.currentPosition)
-        return response
+        return ("MESSAGE", response)
 
     def admingoto(self, position):
         print(position)
         endPoint = self.refPoints[position]
         response = self.adminMove(endPoint - self.currentPosition)
-        return response
+        return ("MESSAGE", response)
 
     def goto_parser(self, params):
         if len(params) != 1:
@@ -470,7 +470,7 @@ class StepperI2C(MotorKit, BaseController):
         step = int(step * self.gearRatio)
         step = round(step)
         response = self.move(step)
-        return response
+        return ("MESSAGE", response)
 
     def homeMove(self, stepLimit=5000, additionalSteps=10):
         if self.currentPosition > 0:
@@ -1233,9 +1233,9 @@ class PololuStepperMotor(BaseController):
             self.currentPosition == self.upperBound
             or self.currentPosition == self.lowerBound
         ):
-            return "{0}/{1}/{2}".format(self.name, "position", "limit")
+            return ("ALERT", "{0}/{1}/{2}".format(self.name, "position", "limit"))
         else:
-            return "{0}/{1}/{2}".format(self.name, "position", self.currentPosition)
+            return ("MESSAGE", "{0}/{1}/{2}".format(self.name, "position", self.currentPosition))
 
     def move_parser(self, params):
         if len(params) != 1:
@@ -1265,7 +1265,7 @@ class PololuStepperMotor(BaseController):
         step = int(step * self.gearRatio)
         step = round(step)
         response = self.move(step)
-        return response
+        return ("MESSAGE", response)
 
     def homeMove(self, stepLimit=5000, additionalSteps=10):
         if self.currentPosition > 0:
@@ -1921,9 +1921,9 @@ class S42CStepperMotor(BaseController):
         self.state["position"] += moveSteps
 
         if self.state["position"] == self.UB or self.state["position"] == self.LB:
-            return "{0}/{1}/{2}".format(self.name, "position", "limit")
+            return ("ALERT", "{0}/{1}/{2}".format(self.name, "position", "limit"))
         else:
-            return "{0}/{1}/{2}".format(self.name, "position", self.state["position"])
+            return ("MESSAGE", "{0}/{1}/{2}".format(self.name, "position", self.state["position"]))
 
     def goto(self, ref: str, safe=True):
         """

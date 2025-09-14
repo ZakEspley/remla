@@ -726,6 +726,18 @@ def testws():
     asyncio.get_event_loop().run_until_complete(start_server)
     asyncio.get_event_loop().run_forever()
 
+@app.command()
+def boot():
+    """Send 'boot' command to the running remla server via IPC."""
+    ipc_path = "/tmp/remla_cmd.sock"
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.connect(ipc_path)
+            sock.sendall(b"boot")
+        print("Boot command sent to server.")
+    except Exception as e:
+        print(f"Failed to send boot command: {e}")
+
 
 if __name__ == "__main__":
     app()
