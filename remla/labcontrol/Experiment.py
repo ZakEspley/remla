@@ -319,16 +319,16 @@ class Experiment(object):
             while True:
                 conn, _ = ipc_sock.accept()
                 data = conn.recv(1024).decode().strip()
-                if data == "boot":
+                if data in ["boot", "contact"]:
                     # Send boot message to active client
                     if self.activeClient:
                         future = asyncio.run_coroutine_threadsafe(
-                            self.sendMessage(self.activeClient, "Experiment/message/boot"),
+                            self.sendMessage(self.activeClient, f"Experiment/message/{data}"),
                             self.loop
                         )
-                        print("Sent boot message to active client.")
+                        print(f"Sent {data} message to active client.")
                     else:
-                        print("No active client to send boot message.")
+                        print(f"No active client to send {data} message.")
                 conn.close()
 
 
