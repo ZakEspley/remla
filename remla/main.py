@@ -27,7 +27,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 
 
 def version_callback(value: bool):
@@ -737,6 +737,19 @@ def boot():
         print("Boot command sent to server.")
     except Exception as e:
         print(f"Failed to send boot command: {e}")
+
+@app.command()
+def contact():
+    """Send 'contact' command to the running remla server via IPC."""
+    ipc_path = "/tmp/remla_cmd.sock"
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.connect(ipc_path)
+            sock.sendall(b"contact")
+        print("Contact command sent to server.")
+    except Exception as e:
+        print(f"Failed to send contact command: {e}")
+
 
 
 if __name__ == "__main__":
