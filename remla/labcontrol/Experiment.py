@@ -323,7 +323,7 @@ class Experiment(object):
                     # Send message to active client
                     if self.activeClient:
                         future = asyncio.run_coroutine_threadsafe(
-                            self.sendMessage(self.activeClient, f"Experiment/message/{data}"),
+                            self.sendAlert(self.activeClient, f"Experiment/message/{data}"),
                             self.loop
                         )
                         print(f"Sent {data} message to active client.")
