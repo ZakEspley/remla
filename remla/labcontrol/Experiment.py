@@ -159,20 +159,25 @@ class Experiment(object):
         if lockGroupName:
             async with self.lockGroups[lockGroupName]:
                 loop = asyncio.get_event_loop()
-                response_type,result = await loop.run_in_executor(
+                response = await loop.run_in_executor(
                     self.executor, runMethod, device, method, params
                 )
+                if len(response) > 1:
+                    response_type = response[0]
+                    result = response[1]
+                else:
+                    response_type = "MESSAGE"
+                    result = response[0]
         else:
             logging.error("All devices need a lock")
             raise
             # result = await self.runMethod(device, method, params)
         if result is not None:
             logging.info(f"Device {deviceName} ran {method} with result: {result}")
-            print(result)
-            if result[0] == "ALERT":
-                await self.sendAlert(websocket, f"{result[1]}")
+            if response_type == "ALERT":
+                await self.sendAlert(websocket, f"{result}")
             else:
-                await self.sendMessage(websocket, f"{result[1]}")
+                await self.sendMessage(websocket, f"{result}")
         else:
             await self.sendMessage(websocket, f"{deviceName} ran {method}")
 
