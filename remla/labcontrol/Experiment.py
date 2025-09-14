@@ -320,7 +320,7 @@ class Experiment(object):
                 conn, _ = ipc_sock.accept()
                 data = conn.recv(1024).decode().strip()
                 if data in ["boot", "contact"]:
-                    # Send boot message to active client
+                    # Send message to active client
                     if self.activeClient:
                         future = asyncio.run_coroutine_threadsafe(
                             self.sendMessage(self.activeClient, f"Experiment/message/{data}"),
