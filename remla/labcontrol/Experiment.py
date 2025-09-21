@@ -104,13 +104,13 @@ class Experiment(object):
         try:
             if self.activeClient is None and self.clients:
                 self.activeClient = websocket
-                await self.sendMessage(
-                    websocket, "You have control of the lab equipment."
+                await self.sendAlert(
+                    websocket, "Experiment/message/You have control of the lab equipment."
                 )
             else:
-                await self.sendMessage(
+                await self.sendAlert(
                     websocket,
-                    "You are connected but do not have control of the lab equipment.",
+                    "Experiment/message/You are connected but do not have control of the lab equipment.",
                 )
             async for command in websocket:
                 if websocket == self.activeClient:
