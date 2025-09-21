@@ -105,12 +105,12 @@ class Experiment(object):
             if self.activeClient is None and self.clients:
                 self.activeClient = websocket
                 await self.sendAlert(
-                    websocket, "Experiment/message/You have control of the lab equipment."
+                    websocket, "Experiment/controlStatus/1,You have control of the lab equipment."
                 )
             else:
                 await self.sendAlert(
                     websocket,
-                    "Experiment/message/You are connected but do not have control of the lab equipment.",
+                    "Experiment/controlStatus/0,You are connected but do not have control of the lab equipment.",
                 )
             async for command in websocket:
                 if websocket == self.activeClient:
@@ -118,8 +118,8 @@ class Experiment(object):
                     task.add_done_callback(self.logException)
                 else:
                     asyncio.create_task(
-                        self.sendMessage(
-                            websocket, "You do not have control to send commands."
+                        self.sendAlert(
+                            websocket, "Experiment/controlStatus/0,You do not have control to send commands."
                         )
                     )
         finally:
@@ -131,15 +131,16 @@ class Experiment(object):
                     self.clients[0] if len(self.clients) > 0 else None
                 )  # set the first client in the list to be the new active client
                 if self.activeClient is not None:
-                    await self.sendMessage(
-                        self.activeClient, "You are the new active client."
+                    await self.sendAlert(
+                        self.activeClient, "Experiment/controlStatus/1,You are the new active client."
                     )
                 print("the first client has changed!")
-                logging.info("Looping through devices - resetting them.")
-                for deviceName, device in self.devices.items():
-                    logging.info("Running reset and cleanup on device " + deviceName)
-                    device.reset()
-                logging.info("Everything reset properly!")
+                self.resetExperiment()
+                # logging.info("Looping through devices - resetting them.")
+                # for deviceName, device in self.devices.items():
+                #     logging.info("Running reset and cleanup on device " + deviceName)
+                #     device.reset()
+                # logging.info("Everything reset properly!")
 
     async def processCommand(self, command, websocket):
         print(f"Processing Command {command} from {websocket}")
@@ -248,18 +249,19 @@ class Experiment(object):
             self.socket.close()
             logging.info("Socket is closed")
 
-        if self.messengerSocket is not None:
-            self.messengerSocket.close()
-            logging.info("Messenger socket closed")
+        # if self.messengerSocket is not None:
+        #     self.messengerSocket.close()
+        #     logging.info("Messenger socket closed")
 
         if not self.admin:
-            logging.info("Looping through devices shutting them down.")
-            for deviceName, device in self.devices.items():
-                logging.info("Running reset and cleanup on device " + deviceName)
-                device.reset()
-            logging.info("Everything shutdown properly. Exiting")
-        gpio.cleanup()
+            self.resetExperiment()
+        else:
+            gpio.cleanup()
         exit(0)
+
+    def setupSignalHandlers(self):
+        signal.signal(signal.SIGINT, self.exitHandler)
+        signal.signal(signal.SIGTERM, self.exitHandler)
 
     def closeHandler(self):
         logging.info("Client Disconnected. Handling Close.")
@@ -279,14 +281,15 @@ class Experiment(object):
                 f = open(self.socketPath, "w")
                 f.close()
 
-            if self.messenger is not None:
-                self.messengerThread = threading.Thread(
-                    target=self.messenger.setup, daemon=True
-                )
-                self.messengerThread.start()
+            # if self.messenger is not None:
+            #     self.messengerThread = threading.Thread(
+            #         target=self.messenger.setup, daemon=True
+            #     )
+            #     self.messengerThread.start()
             os.unlink(self.socketPath)
             self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
             signal(SIGINT, self.exitHandler)
+            signal(SIGTERM, self.exitHandler)
             self.socket.bind(self.socketPath)
             self.socket.listen(1)
             self.socket.setTimeout(1)
@@ -333,3 +336,10 @@ class Experiment(object):
 
 
         threading.Thread(target=ipc_loop, daemon=True).start()
+
+    def resetExperiment(self):
+        logging.info("Resetting experiment to original state.")
+        for deviceName, device in self.devices.items():
+            logging.info(f"Resetting device {deviceName}")
+            device.reset()
+        logging.info("Experiment reset complete.")
