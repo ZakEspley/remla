@@ -4,6 +4,8 @@ import logging
 import os
 import socket
 import threading
+import time
+import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from signal import SIGINT, signal
@@ -66,6 +68,64 @@ class Experiment(object):
         self.startIpcListener()
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
+
+    # -----------------------
+    # JSON helpers
+    # -----------------------
+    def _now_meta(self, replyId=None):
+        return {
+            "timestamp": int(time.time()),
+            "version": "1.0.0",
+            "messageId": uuid.uuid4().hex,
+            "replyId": replyId,
+        }
+
+    def build_packet(self, ptype: str, payload, replyId=None) -> str:
+        packet = {"meta": self._now_meta(replyId), "type": ptype, "payload": payload}
+        return json.dumps(packet)
+
+    def _map_response_type_to_packet_type(self, response_type: str) -> str:
+        rt = (response_type or "").upper()
+        if rt == "ALERT":
+            return "alert"
+        if rt == "COMMAND":
+            return "command"
+        if rt == "QUEUE":
+            return "queue"
+        return "debug"
+
+    def parse_incoming_message(self, raw: str):
+        """
+        Accept either legacy "device/cmd/arg1,arg2" or JSON packet (type == 'command').
+        Return (deviceName, commandName, parameters_dict, replyId)
+        Legacy parameters become {"args": [...]}
+        """
+        # try JSON first
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict) and obj.get("type") == "command" and "payload" in obj:
+                payload = obj["payload"]
+                device = payload.get("deviceName")
+                cmd = payload.get("commandName")
+                params = payload.get("parameters", {})
+                if isinstance(params, dict):
+                    params_dict = params
+                elif isinstance(params, list):
+                    params_dict = {"args": params}
+                else:
+                    params_dict = {"args": [params]}
+                replyId = obj.get("meta", {}).get("messageId")
+                return device, cmd, params_dict, replyId
+        except Exception:
+            pass
+
+        # fallback legacy "device/cmd/arg1,arg2"
+        try:
+            deviceName, cmd, params = raw.strip().split("/")
+        except ValueError:
+            raise ValueError("Invalid legacy command format")
+        params_list = params.split(",") if params != "" else []
+        return deviceName, cmd, {"args": params_list}, None
 
     def logException(self, task):
         if task.exception():
@@ -144,16 +204,24 @@ class Experiment(object):
 
     async def processCommand(self, command, websocket):
         print(f"Processing Command {command} from {websocket}")
-        logging.info("Processing Command - " + command)
-        deviceName, cmd, params = command.strip().split("/")
-        params = params.split(",")
+        logging.info("Processing Command - %s", command)
+        try:
+            deviceName, cmd, params_dict, replyId = self.parse_incoming_message(command)
+        except Exception as e:
+            await self.sendDataToClient(
+                websocket, self.build_packet("debug", {"error": f"Invalid command: {str(e)}"})
+            )
+            return
+
         if deviceName not in self.devices:
-            print("Raising no device error")
-            raise NoDeviceError(deviceName)
+            await self.sendDataToClient(
+                websocket, self.build_packet("debug", {"error": f"No device named {deviceName}"}, replyId)
+            )
+            return
 
-        await self.runDeviceMethod(deviceName, cmd, params, websocket)
+        await self.runDeviceMethod(deviceName, cmd, params_dict, websocket, replyId)
 
-    async def runDeviceMethod(self, deviceName, method, params, websocket):
+    async def runDeviceMethod(self, deviceName, method, params, websocket, replyId=None):
         device = self.devices.get(deviceName)
 
         lockGroupName = self.lockMapping.get(deviceName)
@@ -163,24 +231,35 @@ class Experiment(object):
                 response = await loop.run_in_executor(
                     self.executor, runMethod, device, method, params
                 )
-                if len(response) > 1:
+                # normalize controller responses:
+                # (type, payload) or dict or string
+                if isinstance(response, (list, tuple)) and len(response) >= 2:
                     response_type = response[0]
                     result = response[1]
+                elif isinstance(response, dict):
+                    response_type = "MESSAGE"
+                    result = response
                 else:
                     response_type = "MESSAGE"
-                    result = response[0]
+                    result = response
         else:
             logging.error("All devices need a lock")
             raise
             # result = await self.runMethod(device, method, params)
+        # Always send JSON packets to client
         if result is not None:
-            logging.info(f"Device {deviceName} ran {method} with result: {result}")
-            if response_type == "ALERT":
-                await self.sendAlert(websocket, f"{result}")
-            else:
-                await self.sendMessage(websocket, f"{result}")
+            logging.info("Device %s ran %s with result: %s", deviceName, method, result)
+            packet_type = self._map_response_type_to_packet_type(response_type)
+            payload = {
+                "deviceName": deviceName,
+                "commandName": method,
+                "responseType": response_type,
+                "result": result,
+            }
+            await self.sendDataToClient(websocket, self.build_packet(packet_type, payload, replyId))
         else:
-            await self.sendMessage(websocket, f"{deviceName} ran {method}")
+            payload = {"deviceName": deviceName, "commandName": method, "info": "ran"}
+            await self.sendDataToClient(websocket, self.build_packet("debug", payload, replyId))
 
     def startServer(self):
         # This function sets up and runs the WebSocket server indefinitely
@@ -192,26 +271,38 @@ class Experiment(object):
         self.loop.run_until_complete(start_server)
         self.loop.run_forever()
 
-    async def sendDataToClient(self, websocket, dataStr: str):
+    async def sendDataToClient(self, websocket, data):
+        """
+        Always send JSON. Accept either:
+         - a dict/list (serialized as packet)
+         - a JSON string (sent as-is)
+         - anything else -> wrapped into a debug packet
+        """
         try:
-            await websocket.send(dataStr)
+            if isinstance(data, (dict, list)):
+                payload = json.dumps(data)
+            elif isinstance(data, str):
+                # if it's valid JSON string, send as-is; else wrap as debug packet
+                try:
+                    json.loads(data)
+                    payload = data
+                except Exception:
+                    payload = self.build_packet("debug", {"message": data})
+            else:
+                payload = json.dumps(data)
+            await websocket.send(payload)
         except websockets.exceptions.ConnectionClosed:
-            logging.warning(
-                f"Failed to send message: {dataStr} - Connection was closed."
-            )
-            print(f"Failed to send message: {dataStr} - Connection was closed.")
+            logging.warning("Failed to send message: %s - Connection was closed.", data)
+            print(f"Failed to send message: {data} - Connection was closed.")
 
-    async def sendMessage(self, websocket, message: str):
-        updatedMessage = f"MESSAGE: {message}"
-        await self.sendDataToClient(websocket, updatedMessage)
+    async def sendMessage(self, websocket, message):
+        await self.sendDataToClient(websocket, self.build_packet("debug", {"message": message}))
 
-    async def sendAlert(self, websocket, alertMsg: str):
-        updatedAlertMsg = f"ALERT: {alertMsg}"
-        await self.sendDataToClient(websocket, updatedAlertMsg)
+    async def sendAlert(self, websocket, alertMsg):
+        await self.sendDataToClient(websocket, self.build_packet("alert", {"message": alertMsg}))
 
-    async def sendCommandToClient(self, websocket, command: str):
-        updatedCommand = f"COMMAND: {command}"
-        await self.sendDataToClient(websocket, updatedCommand)
+    async def sendCommandToClient(self, websocket, command):
+        await self.sendDataToClient(websocket, self.build_packet("command", {"command": command}))
 
     def deviceNames(self):
         names = []
@@ -317,7 +408,7 @@ class Experiment(object):
         ipc_sock.bind(ipc_path)
         ipc_sock.listen(1)
         print(f"IPC listener started at {ipc_path}")
-
+ 
         def ipc_loop():
             while True:
                 conn, _ = ipc_sock.accept()
@@ -325,16 +416,15 @@ class Experiment(object):
                 if data in ["boot", "contact"]:
                     # Send message to active client
                     if self.activeClient:
+                        packet = self.build_packet("alert", {"message": f"Experiment/message/{data}"})
                         future = asyncio.run_coroutine_threadsafe(
-                            self.sendAlert(self.activeClient, f"Experiment/message/{data}"),
-                            self.loop
+                            self.sendDataToClient(self.activeClient, packet), self.loop
                         )
                         print(f"Sent {data} message to active client.")
                     else:
                         print(f"No active client to send {data} message.")
                 conn.close()
-
-
+ 
         threading.Thread(target=ipc_loop, daemon=True).start()
 
     def resetExperiment(self):

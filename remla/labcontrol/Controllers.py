@@ -80,23 +80,44 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
         pass
 
     def cmdHandler(self, cmd, params, deviceName):
+        """
+        Handle both legacy (list) and JSON (dict) parameter formats.
+        
+        Legacy: params is a list ["arg1", "arg2", ...]
+        JSON: params is a dict {"args": [...], "other_key": value, ...}
+        
+        The parser will receive the normalized format it expects.
+        """
+        # Normalize params to list for backwards compatibility with existing parsers
+        if isinstance(params, dict):
+            # JSON format - extract args list if present, else convert dict to list of values
+            if "args" in params:
+                params_list = params["args"]
+            else:
+                # If no "args" key, pass the entire dict to the parser
+                params_list = [params]
+        else:
+            # Legacy format - already a list
+            params_list = params
+
         # Make the parser name, it should follow the naming convention <cmd>_parser. If there is no parser return None.
         parser_name = f"{cmd}_parser"
         parser = getattr(self, parser_name, None)
 
         # If parser exists, use it to parse the params.
         if parser is not None:
-            params = parser(params)
+            params_parsed = parser(params_list)
         # If there is no parser print this statement for user.
         else:
             print("No Parser Found. Will just pass params to command.")
+            params_parsed = params_list
 
         # Now get the command method. If there isn't a method, it should throw an AttributeError.
         try:
             method = getattr(self, cmd)
             print(method)
             if callable(method):
-                response = method(params)
+                response = method(params_parsed)
                 return response
         except Exception as e:
             print(f"{self.__class__.__name__} does not have <{cmd}> cmd")
