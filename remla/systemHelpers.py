@@ -415,11 +415,11 @@ def cycle_initialize_cameras(timeout_per_camera: int = 4) -> None:
     device_settings = lab_settings.get("devices", {})
     camera_cfg = None
     for device in device_settings.values():
-        if device.get("type") == "ArduCamMultiCamera":
+        if device.get("type") in {"ArduCamMultiCamera", "PiCamera2MultiCam"}:
             camera_cfg = device
             break
     if camera_cfg is None:
-        logger.info("No ArduCamMultiCamera device configured in lab settings; skipping camera cycling.")
+        logger.info("No supported multi-camera device configured in lab settings; skipping camera cycling.")
         return
 
     numCameras = camera_cfg.get("numCameras", 0)
@@ -477,4 +477,3 @@ def get_boot_status() -> bool:
         runMarker.write_text(str(current_boot))
         logger.error("Boot record file missing; assuming reboot.")
         return True
-

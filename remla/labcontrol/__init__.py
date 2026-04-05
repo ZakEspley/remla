@@ -16,6 +16,7 @@ from .Controllers import (
     PololuStepperMotor,
     PushButton,
     PWMChannel,
+    PiCamera2MultiCam,
     S42CStepperMotor,
     SingleGPIO,
     StepperI2C,

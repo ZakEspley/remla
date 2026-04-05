@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import time
+import shutil
 from abc import ABC, ABCMeta, abstractmethod
 from warnings import warn
 
@@ -1502,6 +1503,281 @@ class ArduCamMultiCamera(BaseController):
             for setting, value in self.defaultSettings.items():
                 self.imageMod([setting, value])
                 time.sleep(0.1)
+
+
+class PiCamera2MultiCam(BaseController):
+    deviceType = "measurement"
+
+    CONTROL_MAPPINGS = {
+        "brightness": "Brightness",
+        "contrast": "Contrast",
+        "saturation": "Saturation",
+        "sharpness": "Sharpness",
+        "analoguegain": "AnalogueGain",
+        "gain": "AnalogueGain",
+        "exposuretime": "ExposureTime",
+        "exposure_time": "ExposureTime",
+        "exposure": "ExposureTime",
+        "awb": "AwbEnable",
+        "awbenable": "AwbEnable",
+        "colourgains": "ColourGains",
+        "awb_gains": "ColourGains",
+        "aeenable": "AeEnable",
+        "autoexposure": "AeEnable",
+        "lensposition": "LensPosition",
+    }
+
+    def __init__(
+        self,
+        name,
+        numCameras,
+        videoNumber=0,
+        defaultSettings=None,
+        i2cbus=11,
+        initialCamera="a",
+        controlPins=[4, 17, 18],
+        cameraNamesDict=None,
+        streamPath="cam",
+        streamUrl=None,
+        width=1920,
+        height=1080,
+        fps=30,
+        bitrate=5000000,
+        hflip=False,
+        vflip=False,
+    ):
+        super().__init__(name)
+        self.videoNumber = videoNumber
+        self.numCameras = numCameras
+        self.defaultSettings = defaultSettings or {}
+        self.i2cbus = i2cbus
+        self.cameraNames = cameraNamesDict or {}
+        self.initialCamera = initialCamera
+        self.streamPath = streamPath
+        self.streamUrl = streamUrl or f"rtsp://127.0.0.1:8554/{streamPath}"
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.bitrate = bitrate
+        self.hflip = hflip
+        self.vflip = vflip
+        self.selection, self.enable1, self.enable2 = controlPins
+        self.channels = controlPins
+        gpio.setup(self.channels, gpio.OUT)
+        from remla.systemHelpers import get_camera_logger
+
+        self.logger = get_camera_logger()
+
+        self.cameraDict = {
+            "a": (gpio.LOW, gpio.LOW, gpio.HIGH),
+            "b": (gpio.HIGH, gpio.LOW, gpio.HIGH),
+            "c": (gpio.LOW, gpio.HIGH, gpio.LOW),
+            "d": (gpio.HIGH, gpio.HIGH, gpio.LOW),
+            "off": (gpio.LOW, gpio.HIGH, gpio.HIGH),
+        }
+        self.slot_order = ["a", "b", "c", "d"]
+        self.active_slot = None
+        self.picam2 = None
+        self.encoder = None
+        self.output = None
+
+        self._runtime = None
+        self._ensure_runtime()
+        self._start_camera(self._resolve_camera_param(initialCamera), apply_defaults=True)
+        self.state["camera"] = self.active_slot
+
+    def _ensure_runtime(self):
+        if self._runtime is not None:
+            return self._runtime
+        if shutil.which("ffmpeg") is None:
+            raise RuntimeError("ffmpeg is required to publish Picamera2 output to MediaMTX")
+
+        try:
+            from libcamera import Transform
+            from picamera2 import Picamera2
+            from picamera2.encoders import H264Encoder
+            from picamera2.outputs import FfmpegOutput
+        except Exception as exc:
+            raise RuntimeError(
+                "PiCamera2MultiCam requires Picamera2/libcamera packages on the Raspberry Pi runtime"
+            ) from exc
+
+        self._runtime = {
+            "Picamera2": Picamera2,
+            "H264Encoder": H264Encoder,
+            "FfmpegOutput": FfmpegOutput,
+            "Transform": Transform,
+        }
+        return self._runtime
+
+    def _coerce_bool(self, value):
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _coerce_control_value(self, control_name, value):
+        if control_name in {"AwbEnable", "AeEnable"}:
+            return self._coerce_bool(value)
+        if control_name == "ColourGains":
+            if isinstance(value, (list, tuple)) and len(value) == 2:
+                return (float(value[0]), float(value[1]))
+            pieces = [part.strip() for part in str(value).split(",")]
+            if len(pieces) != 2:
+                raise ValueError("ColourGains expects two comma-separated values")
+            return (float(pieces[0]), float(pieces[1]))
+        try:
+            if "." in str(value):
+                return float(value)
+            return int(value)
+        except ValueError:
+            return value
+
+    def _normalize_control_name(self, control_name):
+        key = str(control_name).strip()
+        normalized = self.CONTROL_MAPPINGS.get(key.lower())
+        if normalized is not None:
+            return normalized
+        if key and key[0].isupper():
+            return key
+        raise ValueError(f"Unsupported camera control '{control_name}'")
+
+    def _resolve_camera_param(self, param):
+        lowered = str(param).lower()
+        if lowered in self.slot_order:
+            return lowered
+        if lowered == "off":
+            return "off"
+        if lowered in self.cameraNames:
+            return self.cameraNames[lowered]
+        raise ValueError(f"Unknown camera selection '{param}'")
+
+    def _select_slot(self, slot):
+        if slot == "off":
+            gpio.output(self.channels, self.cameraDict["off"])
+            self.active_slot = "off"
+            return
+
+        try:
+            index = self.slot_order.index(slot)
+        except ValueError as exc:
+            raise ValueError(f"Unknown camera slot '{slot}'") from exc
+
+        from remla.systemHelpers import select_arducam_channel_index
+
+        ok = select_arducam_channel_index(
+            index,
+            bus=self.i2cbus,
+            control_pins=list(self.channels),
+        )
+        if not ok:
+            raise RuntimeError(f"Failed to select ArduCam channel '{slot}'")
+        gpio.output(self.channels, self.cameraDict[slot])
+        self.active_slot = slot
+
+    def _build_video_config(self):
+        runtime = self._ensure_runtime()
+        controls = {"FrameRate": self.fps}
+        return self.picam2.create_video_configuration(
+            main={"size": (self.width, self.height)},
+            controls=controls,
+            transform=runtime["Transform"](hflip=self.hflip, vflip=self.vflip),
+        )
+
+    def _release_camera(self):
+        if self.picam2 is None:
+            return
+        try:
+            self.picam2.stop_recording()
+        except Exception:
+            self.logger.debug("Picamera2 stop_recording skipped", exc_info=True)
+        try:
+            self.picam2.close()
+        except Exception:
+            self.logger.debug("Picamera2 close skipped", exc_info=True)
+        self.picam2 = None
+        self.encoder = None
+        self.output = None
+
+    def _start_camera(self, slot, apply_defaults=False):
+        runtime = self._ensure_runtime()
+        self._release_camera()
+
+        if slot == "off":
+            self._select_slot("off")
+            self.state["camera"] = self.active_slot
+            return
+
+        self._select_slot(slot)
+        time.sleep(0.2)
+
+        picam_cls = runtime["Picamera2"]
+        self.picam2 = picam_cls(self.videoNumber) if self.videoNumber else picam_cls()
+        self.picam2.configure(self._build_video_config())
+        self.encoder = runtime["H264Encoder"](bitrate=self.bitrate)
+        output_args = f"-f rtsp -rtsp_transport tcp {self.streamUrl}"
+        self.output = runtime["FfmpegOutput"](output_args)
+        self.picam2.start_recording(self.encoder, self.output)
+        if apply_defaults and self.defaultSettings:
+            self._apply_controls(self.defaultSettings)
+        self.state["camera"] = self.active_slot
+
+    def _apply_controls(self, controls):
+        if self.picam2 is None:
+            raise RuntimeError("Camera is not active")
+        translated = {}
+        for control_name, value in controls.items():
+            normalized_name = self._normalize_control_name(control_name)
+            translated[normalized_name] = self._coerce_control_value(normalized_name, value)
+        self.picam2.set_controls(translated)
+        self.state["controls"] = {**self.state.get("controls", {}), **translated}
+
+    def camera(self, param):
+        slot = self._resolve_camera_param(param)
+        print("Switching to camera " + slot)
+        self._start_camera(slot, apply_defaults=True)
+        self.state["camera"] = slot
+
+    def camera_parser(self, params):
+        if len(params) != 1:
+            raise ArgumentNumberError(len(params), 1, "camera")
+        param = params[0].lower()
+        if param not in self.cameraDict:
+            raise ArgumentError(self.name, "camera", param, ["a", "b", "c", "d", "off"])
+        return param
+
+    def cameraName(self, param):
+        key = str(param).lower()
+        if key not in self.cameraNames:
+            raise ArgumentError(self.name, "cameraName", param, self.cameraNames)
+        slot = self.cameraNames[key]
+        print("Switching to camera {0}, slot {1}".format(key, slot))
+        self._start_camera(slot, apply_defaults=True)
+        self.state["camera"] = slot
+
+    def cameraName_parser(self, params):
+        if len(params) != 1:
+            raise ArgumentNumberError(len(params), 1, "cameraName")
+        param = params[0].lower()
+        if param not in self.cameraNames:
+            raise ArgumentError(self.name, "cameraName", param, self.cameraNames)
+        return param
+
+    def imageMod(self, params):
+        control_name = self._normalize_control_name(params[0])
+        control_value = self._coerce_control_value(control_name, params[1])
+        self._apply_controls({control_name: control_value})
+
+    def imageMod_parser(self, params):
+        if len(params) != 2:
+            raise ArgumentNumberError(len(params), 2, "imageMod")
+        return params
+
+    def reset(self):
+        self._start_camera(self._resolve_camera_param(self.initialCamera), apply_defaults=True)
+        self.state["camera"] = self.active_slot
+
+    def close(self):
+        self._release_camera()
 
 
 class ElectronicScreen(BaseController):

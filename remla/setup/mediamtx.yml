@@ -621,4 +621,4 @@ pathDefaults:
 paths:
   # example:
   cam:
-    source: rpiCamera
+    source: publisher

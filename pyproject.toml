@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "remla"
-version = "0.3.2"
+version = "0.3.3dev1"
 description = ""
 authors = ["Zak Espley <zespley@gmail.com>"]
 readme = "README.md"
