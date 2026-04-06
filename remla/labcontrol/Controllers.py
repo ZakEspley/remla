@@ -1708,6 +1708,39 @@ class PiCamera2MultiCam(BaseController):
         self.encoder = None
         self.output = None
 
+    def _switch_camera_in_place(self, slot, apply_defaults=False):
+        if self.picam2 is None:
+            raise RuntimeError("Camera is not active")
+        if slot == "off":
+            raise RuntimeError("Cannot switch camera in place to 'off'")
+        if self.active_slot in {None, "off"}:
+            raise RuntimeError("Cannot switch camera in place without an active slot")
+        if slot == self.active_slot:
+            if apply_defaults and self.defaultSettings:
+                self._apply_controls(self.defaultSettings)
+            self.state["camera"] = self.active_slot
+            return
+
+        previous_slot = self.active_slot
+        self.logger.info(
+            "Attempting in-place camera switch from %s to %s", previous_slot, slot
+        )
+        self._select_slot(slot)
+        time.sleep(0.2)
+
+        try:
+            if apply_defaults and self.defaultSettings:
+                self._apply_controls(self.defaultSettings)
+        except Exception:
+            self.logger.warning(
+                "In-place switch to %s applied mux selection but failed while restoring controls",
+                slot,
+                exc_info=True,
+            )
+            raise
+
+        self.state["camera"] = self.active_slot
+
     def _start_camera(self, slot, apply_defaults=False):
         runtime = self._ensure_runtime()
         self._release_camera()
@@ -1744,7 +1777,15 @@ class PiCamera2MultiCam(BaseController):
     def camera(self, param):
         slot = self._resolve_camera_param(param)
         print("Switching to camera " + slot)
-        self._start_camera(slot, apply_defaults=True)
+        try:
+            self._switch_camera_in_place(slot, apply_defaults=True)
+        except Exception:
+            self.logger.info(
+                "Falling back to full Picamera2 restart while switching to %s",
+                slot,
+                exc_info=True,
+            )
+            self._start_camera(slot, apply_defaults=True)
         self.state["camera"] = slot
 
     def camera_parser(self, params):
@@ -1761,7 +1802,16 @@ class PiCamera2MultiCam(BaseController):
             raise ArgumentError(self.name, "cameraName", param, self.cameraNames)
         slot = self.cameraNames[key]
         print("Switching to camera {0}, slot {1}".format(key, slot))
-        self._start_camera(slot, apply_defaults=True)
+        try:
+            self._switch_camera_in_place(slot, apply_defaults=True)
+        except Exception:
+            self.logger.info(
+                "Falling back to full Picamera2 restart while switching named camera %s (%s)",
+                key,
+                slot,
+                exc_info=True,
+            )
+            self._start_camera(slot, apply_defaults=True)
         self.state["camera"] = slot
 
     def cameraName_parser(self, params):
