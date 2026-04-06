@@ -155,6 +155,8 @@ class Experiment(object):
 
     async def runDeviceMethod(self, deviceName, method, params, websocket):
         device = self.devices.get(deviceName)
+        response_type = "MESSAGE"
+        result = None
 
         lockGroupName = self.lockMapping.get(deviceName)
         if lockGroupName:
@@ -163,12 +165,16 @@ class Experiment(object):
                 response = await loop.run_in_executor(
                     self.executor, runMethod, device, method, params
                 )
-                if len(response) > 1:
-                    response_type = response[0]
-                    result = response[1]
+                if response is None:
+                    result = None
+                elif isinstance(response, (list, tuple)):
+                    if len(response) > 1:
+                        response_type = response[0]
+                        result = response[1]
+                    elif len(response) == 1:
+                        result = response[0]
                 else:
-                    response_type = "MESSAGE"
-                    result = response[0]
+                    result = response
         else:
             logging.error("All devices need a lock")
             raise

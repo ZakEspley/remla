@@ -95,13 +95,17 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
         # Now get the command method. If there isn't a method, it should throw an AttributeError.
         try:
             method = getattr(self, cmd)
-            print(method)
-            if callable(method):
-                response = method(params)
-                return response
-        except Exception as e:
+        except AttributeError as e:
             print(f"{self.__class__.__name__} does not have <{cmd}> cmd")
             raise e
+
+        print(method)
+        if not callable(method):
+            raise TypeError(
+                f"{self.__class__.__name__}.{cmd} exists but is not callable"
+            )
+
+        return method(params)
 
     @abstractmethod
     def reset(self):
@@ -1639,7 +1643,13 @@ class PiCamera2MultiCam(BaseController):
             return normalized
         if key and key[0].isupper():
             return key
-        raise ValueError(f"Unsupported camera control '{control_name}'")
+        raise ValueError(
+            "Unsupported camera control '{0}' for {1}. Supported aliases: {2}".format(
+                control_name,
+                self.__class__.__name__,
+                ", ".join(sorted(self.CONTROL_MAPPINGS)),
+            )
+        )
 
     def _resolve_camera_param(self, param):
         lowered = str(param).lower()
@@ -1763,9 +1773,26 @@ class PiCamera2MultiCam(BaseController):
         return param
 
     def imageMod(self, params):
-        control_name = self._normalize_control_name(params[0])
-        control_value = self._coerce_control_value(control_name, params[1])
-        self._apply_controls({control_name: control_value})
+        requested_name = params[0]
+        try:
+            control_name = self._normalize_control_name(requested_name)
+            control_value = self._coerce_control_value(control_name, params[1])
+        except ValueError as exc:
+            raise ValueError(
+                "Camera imageMod failed for control '{0}' with value '{1}': {2}".format(
+                    requested_name, params[1], exc
+                )
+            ) from exc
+
+        try:
+            self._apply_controls({control_name: control_value})
+        except Exception as exc:
+            raise RuntimeError(
+                "Camera imageMod failed while applying control '{0}' "
+                "(requested as '{1}') with value '{2}'".format(
+                    control_name, requested_name, params[1]
+                )
+            ) from exc
 
     def imageMod_parser(self, params):
         if len(params) != 2:
