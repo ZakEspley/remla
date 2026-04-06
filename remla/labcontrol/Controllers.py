@@ -1681,7 +1681,6 @@ class PiCamera2MultiCam(BaseController):
         )
         if not ok:
             raise RuntimeError(f"Failed to select ArduCam channel '{slot}'")
-        gpio.output(self.channels, self.cameraDict[slot])
         self.active_slot = slot
 
     def _build_video_config(self):
