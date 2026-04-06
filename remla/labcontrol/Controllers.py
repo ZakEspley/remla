@@ -1707,6 +1707,12 @@ class PiCamera2MultiCam(BaseController):
         self.encoder = None
         self.output = None
 
+    def _build_stream_output(self):
+        runtime = self._ensure_runtime()
+        self.encoder = runtime["H264Encoder"](bitrate=self.bitrate)
+        output_args = f"-f rtsp -rtsp_transport tcp {self.streamUrl}"
+        self.output = runtime["FfmpegOutput"](output_args)
+
     def _switch_camera_in_place(self, slot, apply_defaults=False):
         if self.picam2 is None:
             raise RuntimeError("Camera is not active")
@@ -1724,18 +1730,44 @@ class PiCamera2MultiCam(BaseController):
         self.logger.info(
             "Attempting in-place camera switch from %s to %s", previous_slot, slot
         )
-        self._select_slot(slot)
-        time.sleep(0.2)
 
         try:
+            self.picam2.stop_recording()
+        except Exception:
+            self.logger.warning(
+                "Picamera2 stop_recording failed before switching from %s to %s",
+                previous_slot,
+                slot,
+                exc_info=True,
+            )
+            raise
+
+        try:
+            self._select_slot(slot)
+            time.sleep(0.2)
+            self._build_stream_output()
+            self.picam2.start_recording(self.encoder, self.output)
             if apply_defaults and self.defaultSettings:
                 self._apply_controls(self.defaultSettings)
         except Exception:
             self.logger.warning(
-                "In-place switch to %s applied mux selection but failed while restoring controls",
+                "Paused camera switch from %s to %s failed; attempting to restore previous slot",
+                previous_slot,
                 slot,
                 exc_info=True,
             )
+            try:
+                self._select_slot(previous_slot)
+                time.sleep(0.2)
+                self._build_stream_output()
+                self.picam2.start_recording(self.encoder, self.output)
+                self.state["camera"] = self.active_slot
+            except Exception:
+                self.logger.warning(
+                    "Failed to restore previous slot %s after paused switch failure",
+                    previous_slot,
+                    exc_info=True,
+                )
             raise
 
         self.state["camera"] = self.active_slot
@@ -1755,9 +1787,7 @@ class PiCamera2MultiCam(BaseController):
         picam_cls = runtime["Picamera2"]
         self.picam2 = picam_cls(self.videoNumber) if self.videoNumber else picam_cls()
         self.picam2.configure(self._build_video_config())
-        self.encoder = runtime["H264Encoder"](bitrate=self.bitrate)
-        output_args = f"-f rtsp -rtsp_transport tcp {self.streamUrl}"
-        self.output = runtime["FfmpegOutput"](output_args)
+        self._build_stream_output()
         self.picam2.start_recording(self.encoder, self.output)
         if apply_defaults and self.defaultSettings:
             self._apply_controls(self.defaultSettings)
