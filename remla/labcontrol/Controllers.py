@@ -1708,6 +1708,8 @@ class PiCamera2MultiCam(BaseController):
         self.output = None
 
     def _build_stream_output(self):
+        if self.encoder is not None and self.output is not None:
+            return
         runtime = self._ensure_runtime()
         self.encoder = runtime["H264Encoder"](bitrate=self.bitrate)
         output_args = f"-f rtsp -rtsp_transport tcp {self.streamUrl}"
