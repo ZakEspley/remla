@@ -27,7 +27,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.3.dev6"
+__version__ = "0.3.3.dev7"
 
 
 def version_callback(value: bool):
@@ -37,8 +37,10 @@ def version_callback(value: bool):
 
 
 app = typer.Typer()
+camera_app = typer.Typer(no_args_is_help=True)
 app.add_typer(setupcmd.app, name="setup")
 app.add_typer(i2ccmd.app, name="i2c")
+app.add_typer(camera_app, name="camera")
 
 
 @app.callback()
@@ -59,6 +61,89 @@ def version(
 def showconfig():
     app_dir = typer.get_app_dir(APP_NAME)
     typer.echo(app_dir)
+
+
+@camera_app.command("init", help="Initialize the configured multi-camera mux by setting its GPIO and I2C channel.")
+def camera_init(
+    slot: Annotated[
+        Optional[str],
+        typer.Option(
+            "--slot",
+            "-s",
+            help="Camera slot or camera name to select. Defaults to the configured initialCamera.",
+        ),
+    ] = None,
+):
+    if os.geteuid() != 0:
+        alert("This command must be run as root.")
+        typer.echo("Try running:")
+        typer.echo("sudo remla camera init")
+        raise typer.Abort()
+
+    remla_settings_path = settingsDirectory / "settings.yml"
+    if not remla_settings_path.exists():
+        alert(f"Could not find settings file at {remla_settings_path}")
+        raise typer.Abort()
+
+    remla_settings = yaml.load(remla_settings_path)
+    current_lab = remla_settings.get("currentLab")
+    if not current_lab:
+        alert("No current lab is configured in settings.yml")
+        raise typer.Abort()
+
+    current_lab_settings_path = remoteLabsDirectory / current_lab
+    if not current_lab_settings_path.exists():
+        alert(f"Lab settings file does not exist at {current_lab_settings_path}")
+        raise typer.Abort()
+
+    lab_settings = yaml.load(current_lab_settings_path)
+    devices = lab_settings.get("devices", {})
+
+    camera_name = None
+    camera_details = None
+    for name, details in devices.items():
+        if details.get("type") in {"PiCamera2MultiCam", "ArduCamMultiCamera"}:
+            camera_name = name
+            camera_details = details
+            break
+
+    if camera_details is None:
+        alert("No multi-camera device is configured for the current lab.")
+        raise typer.Abort()
+
+    i2cbus = int(camera_details.get("i2cbus", 11))
+    control_pins = camera_details.get("controlPins", [4, 17, 18])
+    camera_names = camera_details.get("cameraNamesDict") or {}
+    initial_camera = str(camera_details.get("initialCamera", "a")).lower()
+    slot_order = ["a", "b", "c", "d"]
+
+    requested = str(slot or initial_camera).lower()
+    if requested in camera_names:
+        resolved_slot = str(camera_names[requested]).lower()
+    else:
+        resolved_slot = requested
+
+    if resolved_slot not in slot_order:
+        alert(
+            f"Invalid camera selection '{requested}'. Use one of {slot_order} or a configured camera name."
+        )
+        raise typer.Abort()
+
+    ok = select_arducam_channel_index(
+        slot_order.index(resolved_slot),
+        bus=i2cbus,
+        control_pins=list(control_pins),
+    )
+    if not ok:
+        alert(
+            f"Failed to initialize camera mux for device '{camera_name}' on slot '{resolved_slot}'."
+        )
+        raise typer.Abort()
+
+    success(
+        f"Initialized multi-camera mux for '{camera_name}' to slot '{resolved_slot}' "
+        f"(requested '{requested}') on I2C bus {i2cbus}."
+    )
 
 
 @app.command(
