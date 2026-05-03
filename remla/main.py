@@ -145,6 +145,49 @@ def camera_init(
         f"(requested '{requested}') on I2C bus {i2cbus}."
     )
 
+    video_nodes = sorted(Path("/dev").glob("video*"))
+    if video_nodes:
+        typer.echo("Detected V4L2 video device nodes:")
+        for node in video_nodes:
+            typer.echo(f"  - {node}")
+    else:
+        warning(
+            "No /dev/video* nodes are present. On Raspberry Pi OS Bookworm this can still be normal "
+            "when using the libcamera/Picamera2 stack."
+        )
+
+    probe_commands = [
+        ["rpicam-hello", "--list-cameras"],
+        ["libcamera-hello", "--list-cameras"],
+    ]
+    for probe_cmd in probe_commands:
+        if shutil.which(probe_cmd[0]) is None:
+            continue
+        typer.echo(f"Probing camera stack with: {' '.join(probe_cmd)}")
+        result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        output = (result.stdout or "").strip()
+        errors = (result.stderr or "").strip()
+        if output:
+            typer.echo(output)
+        if errors:
+            typer.echo(errors)
+        if result.returncode == 0:
+            success(
+                "The libcamera stack can see at least one camera. "
+                "If you still expected /dev/video0, that is a separate V4L2 compatibility issue."
+            )
+        else:
+            warning(
+                "The camera mux was selected, but the Raspberry Pi camera stack still did not detect a camera. "
+                "This usually means the active mux channel, sensor overlay, or hardware path still needs attention."
+            )
+        break
+    else:
+        warning(
+            "Neither rpicam-hello nor libcamera-hello is installed, so remla could not verify camera detection "
+            "after selecting the mux channel."
+        )
+
 
 @app.command(
     help="Run this to initilize your remla setup. It will make sure you have "
