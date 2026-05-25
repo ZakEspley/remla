@@ -4,6 +4,7 @@ import logging
 import os
 import socket
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from signal import SIGINT, signal
@@ -35,10 +36,21 @@ def runMethod(device, method, params):
 
 
 class Experiment(object):
-    def __init__(self, name, host="localhost", port=8675, admin=False):
+    def __init__(
+        self,
+        name,
+        host="localhost",
+        port=8675,
+        admin=False,
+        mock=False,
+        display_name=None,
+    ):
         self.name = name
+        self.displayName = display_name or name
         self.host = host
         self.port = port
+        self.mock = mock
+        self.mockStateServer = None
         self.devices = {}
 
         self.lockGroups = {}
@@ -64,6 +76,8 @@ class Experiment(object):
         ##############################################################    
         """)
         self.startIpcListener()
+        if self.mock:
+            self.startMockStateServer()
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
 
@@ -75,6 +89,59 @@ class Experiment(object):
         device.experiment = self
         logging.info("Adding Device - " + device.name)
         self.devices[device.name] = device
+
+    def getMockState(self):
+        devices = {}
+        for name, device in self.devices.items():
+            if hasattr(device, "snapshot"):
+                devices[name] = device.snapshot()
+            else:
+                devices[name] = {
+                    "name": name,
+                    "type": device.__class__.__name__,
+                    "state": device.getState() if hasattr(device, "getState") else {},
+                }
+        return {
+            "mock": self.mock,
+            "experiment": self.displayName,
+            "serviceName": self.name,
+            "activeClient": self.activeClient is not None,
+            "clientCount": len(self.clients),
+            "devices": devices,
+        }
+
+    def startMockStateServer(self):
+        experiment = self
+
+        class MockStateHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path not in ["/state", "/health"]:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = json.dumps(experiment.getMockState(), default=str).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, format, *args):
+                logging.debug("Mock state server: " + format, *args)
+
+        class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+            allow_reuse_address = True
+
+        try:
+            self.mockStateServer = ReusableThreadingHTTPServer(
+                ("localhost", mockStatePort), MockStateHandler
+            )
+        except OSError as e:
+            logging.exception("Unable to start mock state server: %s", e)
+            raise
+        threading.Thread(target=self.mockStateServer.serve_forever, daemon=True).start()
+        print(f"Mock state server started at http://localhost:{mockStatePort}/state")
 
     def addLockGroup(self, name: str, devices):
         lock = asyncio.Lock()

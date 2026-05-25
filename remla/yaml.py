@@ -4,6 +4,7 @@ from ruamel.yaml.nodes import ScalarNode
 from pathlib import Path, PosixPath, PurePosixPath, PurePath
 from typing import List, Any
 from remla.labcontrol import Controllers
+from remla.labcontrol.MockController import create_mock_controller
 from collections import defaultdict
 
 
@@ -29,7 +30,7 @@ for cls in [Path, PosixPath, PurePosixPath, PurePath]:
 yaml.constructor.add_constructor('!path', path_constructor)
 
 
-def createDevicesFromYml(deviceData:dict) -> dict[Any]:
+def createDevicesFromYml(deviceData:dict, mock: bool = False) -> dict[Any]:
     """
     Create and initialize devices from a YAML configuration file.
 
@@ -82,14 +83,25 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
         # cls = globals()[deviceDetails['type']]
         cls = getattr(Controllers, deviceDetails['type'])
         initArgs = {k: v for k, v in deviceDetails.items() if k not in ['type', 'name']}
+        mockConfig = initArgs.copy()
+        mockDependencies = {}
 
         # Resolve dependencies for each initialization argument
         for arg, value in initArgs.items():
             if isinstance(value, str) and value in deviceData:
                 initArgs[arg] = resolveDependencies(value)
+                mockDependencies[arg] = initArgs[arg]
 
         # Create the device instance and add to the devices dictionary
-        device = cls(name=deviceName, **initArgs)
+        if mock:
+            device = create_mock_controller(
+                name=deviceName,
+                declared_type=deviceDetails["type"],
+                config=mockConfig,
+                dependencies=mockDependencies,
+            )
+        else:
+            device = cls(name=deviceName, **initArgs)
         devices[deviceName] = device
 
         # Remove device from inProgress set

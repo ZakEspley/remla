@@ -36,6 +36,7 @@ def get_camera_logger() -> logging.Logger:
     """
     logger = logging.getLogger("remla.camera_cycle")
     if not logger.handlers:
+        logsDirectory.mkdir(parents=True, exist_ok=True)
         handler = logging.FileHandler(logsDirectory / "camera_cycle.log")
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
         handler.setFormatter(formatter)
@@ -172,6 +173,7 @@ def updateRemlaNginxConf(port: int, domain:str, wsPort:int) -> None:
     modifiedConf = re.sub(r'\{\{\s*port\s*\}\}', str(port), modifiedConf)
     modifiedConf = re.sub(r'\{\{\s*hostname\s*\}\}', domain, modifiedConf)
     modifiedConf = re.sub(r'\{\{\s*wsPort\s*\}\}', str(wsPort), modifiedConf)
+    modifiedConf = re.sub(r'\{\{\s*mockStatePort\s*\}\}', str(mockStatePort), modifiedConf)
 
     modifiedConfPath = settingsDirectory / "remla.conf"
     # with normalUserPrivileges():
@@ -240,6 +242,7 @@ WorkingDirectory={remoteLabsDirectory}
 ExecStart={executablePath} run {"-w" if echo else ""} -f
 ExecStartPre=/bin/sleep 5
 Restart=always
+EnvironmentFile=-{serviceEnvironmentPath}
 Environment="PATH={binPath}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
 StandardOutput=append:/var/log/remla.log
 StandardError=append:/var/log/remla.log

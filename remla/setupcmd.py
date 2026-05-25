@@ -125,6 +125,9 @@ def _setup(labSettings:dict)->None:
         shutil.copytree(remoteLabsDirectory / "static", websiteDirectory / "static", dirs_exist_ok=True)
     if websiteSettings["staticFolder"] is not None:
         shutil.copytree(remoteLabsDirectory/websiteSettings["staticFolder"], websiteDirectory / "static", dirs_exist_ok=True)
+    websiteMockDirectory = websiteDirectory / "mock"
+    websiteMockDirectory.mkdir(parents=True, exist_ok=True)
+    shutil.copy(setupDirectory / "mock.html", websiteMockDirectory / "index.html")
     requiredFiles = ["reader.js", "mediaMTXGetFeed.js", "remlaSocket.js"]
     for file in requiredFiles:
         shutil.copy(setupDirectory / file, websiteJSDirectory)

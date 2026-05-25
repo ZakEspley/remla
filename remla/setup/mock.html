@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remla Mock Hardware</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f7f8fa;
+            --panel: #ffffff;
+            --border: #cfd6df;
+            --text: #17202a;
+            --muted: #5b6673;
+            --accent: #0b6bcb;
+            --ok: #0f7b4f;
+            --warn: #9b5d00;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border);
+            background: var(--panel);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 650;
+        }
+
+        main {
+            width: 100%;
+            margin: 0 auto;
+            padding: 20px 24px 32px;
+        }
+
+        .status {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 32px;
+            padding: 5px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--panel);
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .pill strong {
+            margin-left: 6px;
+            color: var(--text);
+        }
+
+        .grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        article {
+            width: 100%;
+            min-width: 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--panel);
+            overflow: hidden;
+        }
+
+        article h2 {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 0;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+            font-size: 16px;
+        }
+
+        .type {
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 500;
+            overflow-wrap: anywhere;
+        }
+
+        .state-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+            gap: 8px;
+            padding: 10px;
+        }
+
+        .field {
+            min-width: 0;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: #fbfcfd;
+            overflow: hidden;
+        }
+
+        .field-label {
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border);
+            color: var(--muted);
+            background: #eef2f6;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .field-value {
+            min-height: 34px;
+            max-height: 120px;
+            padding: 8px;
+            font-size: 13px;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            overflow-x: hidden;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .data-list,
+        .data-map {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            margin: 0;
+            padding: 0;
+        }
+
+        .data-list {
+            padding-left: 18px;
+        }
+
+        .data-list li {
+            margin: 0;
+            padding: 5px 6px;
+            border-bottom: 1px solid #e5e9ef;
+        }
+
+        .data-list li:nth-child(odd),
+        .data-row:nth-child(odd) {
+            background: #f4f6f8;
+        }
+
+        .data-list li:nth-child(even),
+        .data-row:nth-child(even) {
+            background: #ffffff;
+        }
+
+        .data-list li:last-child {
+            border-bottom: 0;
+        }
+
+        .data-row {
+            display: grid;
+            grid-template-columns: minmax(0, 34%) minmax(0, 1fr);
+            gap: 8px;
+            padding: 5px 6px;
+            border-bottom: 1px solid #e5e9ef;
+        }
+
+        .data-row:last-child {
+            padding-bottom: 0;
+            border-bottom: 0;
+        }
+
+        .data-key {
+            min-width: 0;
+            color: var(--muted);
+            font-weight: 650;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .data-value {
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .history {
+            padding: 10px 14px 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .history h3 {
+            margin: 0 0 8px;
+            font-size: 13px;
+            color: var(--muted);
+            text-transform: uppercase;
+        }
+
+        .history ol {
+            margin: 0;
+            padding-left: 18px;
+            color: var(--muted);
+            font-size: 13px;
+            max-height: 120px;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
+        }
+
+        .empty,
+        .error {
+            padding: 18px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--panel);
+        }
+
+        .error {
+            color: var(--warn);
+        }
+
+        @media (max-width: 640px) {
+            header {
+                align-items: flex-start;
+                flex-direction: column;
+                padding: 16px;
+            }
+
+            main {
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Remla Mock Hardware</h1>
+    <div class="pill">Refresh<strong id="refreshState">waiting</strong></div>
+</header>
+<main>
+    <section class="status" id="summary"></section>
+    <section id="content" class="grid"></section>
+</main>
+<script>
+    const summary = document.getElementById("summary");
+    const content = document.getElementById("content");
+    const refreshState = document.getElementById("refreshState");
+    const scrollPositions = new Map();
+    let lastStateText = "";
+
+    function formatValue(value) {
+        if (value === null || value === undefined) return "";
+        if (typeof value === "object") return JSON.stringify(value, null, 2);
+        return String(value);
+    }
+
+    function rememberScrollPositions() {
+        document.querySelectorAll("[data-scroll-key]").forEach((element) => {
+            scrollPositions.set(element.dataset.scrollKey, element.scrollTop);
+        });
+    }
+
+    function restoreScrollPositions() {
+        document.querySelectorAll("[data-scroll-key]").forEach((element) => {
+            const value = scrollPositions.get(element.dataset.scrollKey);
+            if (value !== undefined) {
+                element.scrollTop = value;
+            }
+        });
+    }
+
+    function appendStructuredValue(parent, value, depth = 0) {
+        if (value === null || value === undefined) {
+            parent.textContent = "";
+            return;
+        }
+        if (Array.isArray(value)) {
+            const list = document.createElement("ol");
+            list.className = "data-list";
+            for (const item of value) {
+                const li = document.createElement("li");
+                appendStructuredValue(li, item, depth + 1);
+                list.appendChild(li);
+            }
+            parent.appendChild(list);
+            return;
+        }
+        if (typeof value === "object") {
+            const map = document.createElement("div");
+            map.className = "data-map";
+            for (const key of Object.keys(value).sort()) {
+                const row = document.createElement("div");
+                const keyElement = document.createElement("div");
+                const valueElement = document.createElement("div");
+                row.className = "data-row";
+                keyElement.className = "data-key";
+                valueElement.className = "data-value";
+                keyElement.textContent = key;
+                appendStructuredValue(valueElement, value[key], depth + 1);
+                row.appendChild(keyElement);
+                row.appendChild(valueElement);
+                map.appendChild(row);
+            }
+            parent.appendChild(map);
+            return;
+        }
+        parent.textContent = String(value);
+    }
+
+    function renderSummary(data) {
+        summary.innerHTML = "";
+        const items = [
+            ["Mock", data.mock ? "enabled" : "disabled"],
+            ["Experiment", data.experiment || ""],
+            ["Clients", data.clientCount ?? 0],
+            ["Active Client", data.activeClient ? "yes" : "no"],
+            ["Devices", Object.keys(data.devices || {}).length],
+        ];
+        for (const [label, value] of items) {
+            const pill = document.createElement("div");
+            pill.className = "pill";
+            pill.innerHTML = `${label}<strong>${value}</strong>`;
+            summary.appendChild(pill);
+        }
+    }
+
+    function renderDevice(device) {
+        const article = document.createElement("article");
+        const title = document.createElement("h2");
+        const typeLabel = device.mockClass ? `${device.mockClass} (${device.type})` : device.type;
+        title.innerHTML = `<span>${device.name}</span><span class="type">${typeLabel}</span>`;
+        article.appendChild(title);
+
+        const details = document.createElement("div");
+        details.className = "state-grid";
+        const state = device.state || {};
+        for (const key of Object.keys(state).sort()) {
+            if (device.type === "AbsorberController" && key === "subcontrollers") {
+                continue;
+            }
+            const field = document.createElement("div");
+            const label = document.createElement("div");
+            const value = document.createElement("div");
+            field.className = "field";
+            label.className = "field-label";
+            value.className = "field-value";
+            value.dataset.scrollKey = `${device.name}:state:${key}`;
+            label.textContent = key;
+            appendStructuredValue(value, state[key]);
+            field.appendChild(label);
+            field.appendChild(value);
+            details.appendChild(field);
+        }
+        article.appendChild(details);
+
+        const history = (device.history || []).slice(-20).reverse();
+        const historySection = document.createElement("section");
+        historySection.className = "history";
+        historySection.innerHTML = "<h3>Recent Commands</h3>";
+        if (history.length === 0) {
+            const empty = document.createElement("div");
+            empty.textContent = "No commands yet";
+            historySection.appendChild(empty);
+        } else {
+            const list = document.createElement("ol");
+            list.dataset.scrollKey = `${device.name}:history`;
+            for (const entry of history) {
+                const item = document.createElement("li");
+                item.textContent = `${entry.command} ${formatValue(entry.params)}`;
+                list.appendChild(item);
+            }
+            historySection.appendChild(list);
+        }
+        article.appendChild(historySection);
+        return article;
+    }
+
+    function render(data) {
+        rememberScrollPositions();
+        renderSummary(data);
+        content.innerHTML = "";
+        const devices = Object.values(data.devices || {});
+        if (devices.length === 0) {
+            content.className = "";
+            content.innerHTML = '<div class="empty">No mock devices are currently registered.</div>';
+            restoreScrollPositions();
+            return;
+        }
+        content.className = "grid";
+        for (const device of devices) {
+            content.appendChild(renderDevice(device));
+        }
+        restoreScrollPositions();
+    }
+
+    async function loadState() {
+        try {
+            const response = await fetch("/mock-state", {cache: "no-store"});
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const stateText = await response.text();
+            if (stateText === lastStateText) {
+                refreshState.textContent = `unchanged ${new Date().toLocaleTimeString()}`;
+                return;
+            }
+            lastStateText = stateText;
+            const data = JSON.parse(stateText);
+            render(data);
+            refreshState.textContent = new Date().toLocaleTimeString();
+        } catch (error) {
+            content.className = "";
+            content.innerHTML = `<div class="error">Unable to load mock state: ${error.message}</div>`;
+            refreshState.textContent = "error";
+        }
+    }
+
+    loadState();
+    setInterval(loadState, 1000);
+</script>
+</body>
+</html>

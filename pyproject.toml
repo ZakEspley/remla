@@ -4,7 +4,7 @@ version = "0.3.2"
 description = ""
 authors = ["Zak Espley <zespley@gmail.com>"]
 readme = "README.md"
-include = ["setup/*/**"]
+include = ["remla/setup/**"]
 
 [tool.poetry.scripts]
 remla = "remla.main:app"

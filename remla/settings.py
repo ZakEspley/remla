@@ -17,6 +17,7 @@ mediamtxBinaryLocation = Path("/usr/local/bin")
 baseDir = Path(__file__).parent
 settingsDirectory = Path(typer.get_app_dir(APP_NAME))
 logsDirectory = settingsDirectory / "logs"
+serviceEnvironmentPath = settingsDirectory / "remla.env"
 homeDirectory = Path.home()
 remoteLabsDirectory = homeDirectory / 'remla'
 setupDirectory = baseDir / "setup"
@@ -34,5 +35,6 @@ websiteStaticDirectory = websiteDirectory / "static"
 websiteJSDirectory = websiteStaticDirectory / "js"
 websiteCSSDirectory = websiteStaticDirectory / "css"
 websiteImgsDirectory = websiteStaticDirectory / "imgs"
+mockStatePort = 8676
 
 runMarker = settingsDirectory / "remla_camera_cycled" 
