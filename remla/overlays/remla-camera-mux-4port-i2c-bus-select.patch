@@ -1,0 +1,28 @@
+--- a/arch/arm/boot/dts/overlays/camera-mux-4port-overlay.dts
++++ b/arch/arm/boot/dts/overlays/remla-camera-mux-4port-overlay.dts
+@@
+ 		cam0-imx290-clk-freq = <&clk_imx290>,"clock-frequency:0",
+ 				       <&imx290_0>,"clock-frequency:0";
+ 		cam1-imx290-clk-freq = <&clk_imx290>,"clock-frequency:0",
+ 				       <&imx290_1>,"clock-frequency:0";
+ 		cam2-imx290-clk-freq = <&clk_imx290>,"clock-frequency:0",
+ 				       <&imx290_2>,"clock-frequency:0";
+ 		cam3-imx290-clk-freq = <&clk_imx290>,"clock-frequency:0",
+ 				       <&imx290_3>,"clock-frequency:0";
++
++		/* Optional parent I2C bus selection for the PCA9544 mux at 0x70. */
++		i2c0  = <&i2c_frag>, "target:0=", <&i2c0>;
++		i2c1  = <&i2c_frag>, "target:0=", <&i2c1>;
++		i2c2  = <&i2c_frag>, "target:0=", <&i2c2>;
++		i2c3  = <&i2c_frag>, "target:0=", <&i2c3>;
++		i2c4  = <&i2c_frag>, "target:0=", <&i2c4>;
++		i2c5  = <&i2c_frag>, "target:0=", <&i2c5>;
++		i2c6  = <&i2c_frag>, "target:0=", <&i2c6>;
++		i2c7  = <&i2c_frag>, "target:0=", <&i2c7>;
++		i2c8  = <&i2c_frag>, "target:0=", <&i2c8>;
++		i2c9  = <&i2c_frag>, "target:0=", <&i2c9>;
++		i2c10 = <&i2c_frag>, "target:0=", <&i2c10>;
++		i2c11 = <&i2c_frag>, "target:0=", <&i2c11>;
+ 
+ 		cam0 = <&i2c_frag>, "target:0=",<&i2c_csi_dsi0>,
+ 		       <&csi_frag>, "target:0=",<&csi0>;

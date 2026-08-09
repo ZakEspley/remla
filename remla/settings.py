@@ -20,6 +20,14 @@ logsDirectory = settingsDirectory / "logs"
 homeDirectory = Path.home()
 remoteLabsDirectory = homeDirectory / 'remla'
 setupDirectory = baseDir / "setup"
+overlayDirectory = baseDir / "overlays"
+remlaCameraMux4PortOverlayName = "remla-camera-mux-4port"
+remlaCameraMux4PortOverlayPath = overlayDirectory / f"{remlaCameraMux4PortOverlayName}.dtbo"
+remlaOverlayPaths = [
+    remlaCameraMux4PortOverlayPath,
+    overlayDirectory / "remla-camera-mux-4port-i2c-gpio.dtbo",
+]
+bootOverlayDirectory = Path("/boot/firmware/overlays")
 websiteDirectory = settingsDirectory / 'website'
 nginxTemplatePath = setupDirectory / "remla.conf"
 nginxConfPath = Path("/etc/nginx/sites-available/remla.conf")

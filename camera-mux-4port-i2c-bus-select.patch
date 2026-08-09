@@ -1,0 +1,43 @@
+--- a/arch/arm/boot/dts/overlays/camera-mux-4port-overlay.dts
++++ b/arch/arm/boot/dts/overlays/camera-mux-4port-overlay.dts
+@@
+ 		cam0-imx290-clk-freq = <&clk_imx290>,"clock-frequency:0",
+ 					 <&imx290_0>,"clock-frequency:0";
+ 		cam1-imx290-clk-freq = <&clk_imx290>,"clock-frequency:0",
+ 					 <&imx290_1>,"clock-frequency:0";
+ 		cam2-imx290-clk-freq = <&clk_imx290>,"clock-frequency:0",
+ 					 <&imx290_2>,"clock-frequency:0";
+ 		cam3-imx290-clk-freq = <&clk_imx290>,"clock-frequency:0",
+ 					 <&imx290_3>,"clock-frequency:0";
++
++		/*
++		 * Optional parent I2C bus selection for the PCA9544 mux at 0x70.
++		 *
++		 * Default behavior is unchanged: without one of these params the mux
++		 * remains under &i2c_csi_dsi, as in the stock overlay.
++		 *
++		 * Typical use with a software I2C bus created by the stock i2c-gpio
++		 * overlay:
++		 *
++		 *   dtoverlay=i2c-gpio,bus=3,i2c_gpio_sda=23,i2c_gpio_scl=24
++		 *   dtoverlay=camera-mux-4port,cam0-ov5647,cam1-ov5647,i2c3
++		 *
++		 * Device Tree overlays cannot generally translate a numeric parameter
++		 * like i2cbus=3 into a phandle such as &i2c3, so expose the supported
++		 * bus choices as boolean params.
++		 */
++		i2c0  = <&i2c_frag>, "target:0=", <&i2c0>;
++		i2c1  = <&i2c_frag>, "target:0=", <&i2c1>;
++		i2c2  = <&i2c_frag>, "target:0=", <&i2c2>;
++		i2c3  = <&i2c_frag>, "target:0=", <&i2c3>;
++		i2c4  = <&i2c_frag>, "target:0=", <&i2c4>;
++		i2c5  = <&i2c_frag>, "target:0=", <&i2c5>;
++		i2c6  = <&i2c_frag>, "target:0=", <&i2c6>;
++		i2c7  = <&i2c_frag>, "target:0=", <&i2c7>;
++		i2c8  = <&i2c_frag>, "target:0=", <&i2c8>;
++		i2c9  = <&i2c_frag>, "target:0=", <&i2c9>;
++		i2c10 = <&i2c_frag>, "target:0=", <&i2c10>;
++		i2c11 = <&i2c_frag>, "target:0=", <&i2c11>;
++
+ 		cam0 = <&i2c_frag>, "target:0=",<&i2c_csi_dsi0>,
+ 		       <&csi_frag>, "target:0=",<&csi0>;

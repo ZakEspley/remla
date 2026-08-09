@@ -63,6 +63,40 @@ def showconfig():
     typer.echo(app_dir)
 
 
+def _install_remla_overlays() -> None:
+    for overlay_path in remlaOverlayPaths:
+        if not overlay_path.exists():
+            alert(
+                f"Missing packaged overlay: {overlay_path}\n"
+                "Build the REMLA camera mux overlays from the Raspberry Pi kernel overlay source "
+                "and place them in remla/overlays before installing alternate-bus camera mux support."
+            )
+            raise typer.Abort()
+
+    if not bootOverlayDirectory.exists():
+        alert(f"Could not find Raspberry Pi overlay directory at {bootOverlayDirectory}")
+        raise typer.Abort()
+
+    for overlay_path in remlaOverlayPaths:
+        target = bootOverlayDirectory / overlay_path.name
+        shutil.copy2(overlay_path, target)
+        success(f"Installed {target}")
+
+
+@app.command(
+    "install-overlays",
+    help="Install REMLA Device Tree overlays into /boot/firmware/overlays.",
+)
+def install_overlays():
+    if os.geteuid() != 0:
+        alert("This command must be run as root.")
+        typer.echo("Try running:")
+        typer.echo("sudo remla install-overlays")
+        raise typer.Abort()
+
+    _install_remla_overlays()
+
+
 @camera_app.command("init", help="Initialize the configured multi-camera mux by setting its GPIO and I2C channel.")
 def camera_init(
     slot: Annotated[
@@ -413,6 +447,20 @@ def interactivesetup():
 
     remlaPanel("Now updating /boot/firmware/config.txt")
     arducamMultiplexers = {2: "camera-mux-2port", 3: "camera-mux-4port"}
+    use_alternate_mux_bus = False
+    alternate_mux_bus = None
+    if multiplexer == 3:
+        use_alternate_mux_bus = typer.confirm(
+            "Do you want the 4-port camera mux to use an alternate I2C bus?",
+            default=False,
+        )
+        if use_alternate_mux_bus:
+            alternate_mux_bus = IntPrompt.ask(
+                "Which I2C bus should the camera mux use?",
+                choices=[str(i) for i in range(0, 12)],
+                default=3,
+            )
+
     dtOverlayString = "dtoverlay="
 
     if multiplexer == 1:
@@ -420,7 +468,19 @@ def interactivesetup():
     else:
         cams = ["cam" + str(i) + "-" + sensor for i in cameraPorts]
         arducamString = ",".join(cams)
-        dtOverlayString += f"{arducamMultiplexers[multiplexer]},{arducamString}"
+        overlay_name = arducamMultiplexers[multiplexer]
+        if use_alternate_mux_bus:
+            overlay_name = remlaCameraMux4PortOverlayName
+        dtOverlayString += f"{overlay_name},{arducamString}"
+        if alternate_mux_bus is not None:
+            dtOverlayString += f",i2c{alternate_mux_bus}"
+
+    if use_alternate_mux_bus:
+        _install_remla_overlays()
+        warning(
+            "Make sure the selected I2C bus is also configured, for example with "
+            f"dtoverlay=i2c-gpio,bus={alternate_mux_bus},i2c_gpio_sda=23,i2c_gpio_scl=24"
+        )
 
     if customSensor:
         warning("Issue with custom sensor!")
@@ -448,7 +508,11 @@ def interactivesetup():
 
         # Prepare the regex pattern
         # Combine allowed sensors and arducam multiplexer values into one list for the regex pattern
-        combinedOptions = allowedSensors + list(arducamMultiplexers.values())
+        combinedOptions = (
+            allowedSensors
+            + list(arducamMultiplexers.values())
+            + [remlaCameraMux4PortOverlayName]
+        )
         pattern = re.compile(
             r"dtoverlay=("
             + "|".join(re.escape(option) for option in combinedOptions)
