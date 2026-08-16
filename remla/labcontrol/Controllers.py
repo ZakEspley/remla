@@ -1551,6 +1551,10 @@ class PiCamera2MultiCam(BaseController):
         bitrate=5000000,
         hflip=False,
         vflip=False,
+        cameraSwitchMode="hot",
+        keyframeInterval=10,
+        switchSettleTime=0.05,
+        forceKeyframeOnSwitch=True,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1567,6 +1571,10 @@ class PiCamera2MultiCam(BaseController):
         self.bitrate = bitrate
         self.hflip = hflip
         self.vflip = vflip
+        self.cameraSwitchMode = str(cameraSwitchMode).strip().lower()
+        self.keyframeInterval = int(keyframeInterval)
+        self.switchSettleTime = float(switchSettleTime)
+        self.forceKeyframeOnSwitch = self._coerce_bool(forceKeyframeOnSwitch)
         self.selection, self.enable1, self.enable2 = controlPins
         self.channels = controlPins
         gpio.setup(self.channels, gpio.OUT)
@@ -1713,9 +1721,71 @@ class PiCamera2MultiCam(BaseController):
         if self.encoder is not None and self.output is not None:
             return
         runtime = self._ensure_runtime()
-        self.encoder = runtime["H264Encoder"](bitrate=self.bitrate)
-        output_args = f"-f rtsp -rtsp_transport tcp {self.streamUrl}"
+        encoder_cls = runtime["H264Encoder"]
+        encoder_args = {"bitrate": self.bitrate}
+        try:
+            encoder_params = inspect.signature(encoder_cls).parameters
+            if "repeat" in encoder_params:
+                encoder_args["repeat"] = True
+            if "iperiod" in encoder_params:
+                encoder_args["iperiod"] = self.keyframeInterval
+        except (TypeError, ValueError):
+            pass
+        self.encoder = encoder_cls(**encoder_args)
+        output_args = f"-f rtsp -rtsp_transport tcp -muxdelay 0 -muxpreload 0 {self.streamUrl}"
         self.output = runtime["FfmpegOutput"](output_args)
+
+    def _request_keyframe(self):
+        if not self.forceKeyframeOnSwitch or self.encoder is None:
+            return
+        for method_name in ("request_key_frame", "force_key_frame", "force_keyframe"):
+            method = getattr(self.encoder, method_name, None)
+            if method is None:
+                continue
+            try:
+                method()
+                self.logger.info("Requested H264 keyframe with %s", method_name)
+                return
+            except Exception:
+                self.logger.debug("H264 keyframe request via %s failed", method_name, exc_info=True)
+
+    def _switch_camera_hot(self, slot, apply_defaults=False):
+        if slot == "off":
+            self._start_camera(slot, apply_defaults=apply_defaults)
+            return
+        if self.picam2 is None or self.active_slot in {None, "off"}:
+            self._start_camera(slot, apply_defaults=apply_defaults)
+            return
+        if slot == self.active_slot:
+            if apply_defaults and self.defaultSettings:
+                self._apply_controls(self.defaultSettings)
+            self._request_keyframe()
+            self.state["camera"] = self.active_slot
+            return
+
+        previous_slot = self.active_slot
+        self.logger.info("Hot-switching camera mux from %s to %s", previous_slot, slot)
+        try:
+            self._select_slot(slot)
+            if self.switchSettleTime > 0:
+                time.sleep(self.switchSettleTime)
+            if apply_defaults and self.defaultSettings:
+                self._apply_controls(self.defaultSettings)
+            self._request_keyframe()
+        except Exception:
+            self.logger.warning(
+                "Hot camera switch from %s to %s failed; restoring previous slot",
+                previous_slot,
+                slot,
+                exc_info=True,
+            )
+            try:
+                self._select_slot(previous_slot)
+                self._request_keyframe()
+            except Exception:
+                self.logger.warning("Failed to restore previous slot %s", previous_slot, exc_info=True)
+            raise
+        self.state["camera"] = self.active_slot
 
     def _switch_camera_in_place(self, slot, apply_defaults=False):
         if self.picam2 is None:
@@ -1811,11 +1881,25 @@ class PiCamera2MultiCam(BaseController):
         self.picam2.set_controls(translated)
         self.state["controls"] = {**self.state.get("controls", {}), **translated}
 
+    def _switch_camera(self, slot, apply_defaults=False):
+        if self.cameraSwitchMode == "hot":
+            self._switch_camera_hot(slot, apply_defaults=apply_defaults)
+        elif self.cameraSwitchMode == "restart":
+            self.logger.info("Restarting Picamera2 while switching to %s", slot)
+            self._start_camera(slot, apply_defaults=apply_defaults)
+        elif self.cameraSwitchMode in {"pause", "in-place", "in_place"}:
+            self._switch_camera_in_place(slot, apply_defaults=apply_defaults)
+        else:
+            raise ValueError(
+                "Unsupported cameraSwitchMode '{0}'. Use hot, restart, or pause.".format(
+                    self.cameraSwitchMode
+                )
+            )
+
     def camera(self, param):
         slot = self._resolve_camera_param(param)
         print("Switching to camera " + slot)
-        self.logger.info("Restarting Picamera2 while switching to %s", slot)
-        self._start_camera(slot, apply_defaults=True)
+        self._switch_camera(slot, apply_defaults=True)
         self.state["camera"] = slot
 
     def camera_parser(self, params):
@@ -1832,12 +1916,7 @@ class PiCamera2MultiCam(BaseController):
             raise ArgumentError(self.name, "cameraName", param, self.cameraNames)
         slot = self.cameraNames[key]
         print("Switching to camera {0}, slot {1}".format(key, slot))
-        self.logger.info(
-            "Restarting Picamera2 while switching named camera %s (%s)",
-            key,
-            slot,
-        )
-        self._start_camera(slot, apply_defaults=True)
+        self._switch_camera(slot, apply_defaults=True)
         self.state["camera"] = slot
 
     def cameraName_parser(self, params):
