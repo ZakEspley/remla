@@ -1814,15 +1814,8 @@ class PiCamera2MultiCam(BaseController):
     def camera(self, param):
         slot = self._resolve_camera_param(param)
         print("Switching to camera " + slot)
-        try:
-            self._switch_camera_in_place(slot, apply_defaults=True)
-        except Exception:
-            self.logger.info(
-                "Falling back to full Picamera2 restart while switching to %s",
-                slot,
-                exc_info=True,
-            )
-            self._start_camera(slot, apply_defaults=True)
+        self.logger.info("Restarting Picamera2 while switching to %s", slot)
+        self._start_camera(slot, apply_defaults=True)
         self.state["camera"] = slot
 
     def camera_parser(self, params):
@@ -1839,16 +1832,12 @@ class PiCamera2MultiCam(BaseController):
             raise ArgumentError(self.name, "cameraName", param, self.cameraNames)
         slot = self.cameraNames[key]
         print("Switching to camera {0}, slot {1}".format(key, slot))
-        try:
-            self._switch_camera_in_place(slot, apply_defaults=True)
-        except Exception:
-            self.logger.info(
-                "Falling back to full Picamera2 restart while switching named camera %s (%s)",
-                key,
-                slot,
-                exc_info=True,
-            )
-            self._start_camera(slot, apply_defaults=True)
+        self.logger.info(
+            "Restarting Picamera2 while switching named camera %s (%s)",
+            key,
+            slot,
+        )
+        self._start_camera(slot, apply_defaults=True)
         self.state["camera"] = slot
 
     def cameraName_parser(self, params):
