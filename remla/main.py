@@ -27,7 +27,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.3.dev8"
+__version__ = "0.3.3.dev9"
 
 
 def version_callback(value: bool):
@@ -145,7 +145,12 @@ def camera_init(
         alert("No multi-camera device is configured for the current lab.")
         raise typer.Abort()
 
-    i2cbus = int(camera_details.get("i2cbus", 11))
+    configured_i2cbus = camera_details.get("i2cbus", 11)
+    try:
+        i2cbus = resolve_i2c_bus(configured_i2cbus)
+    except RuntimeError as exc:
+        alert(str(exc))
+        raise typer.Abort()
     control_pins = camera_details.get("controlPins", [4, 17, 18])
     camera_names = camera_details.get("cameraNamesDict") or {}
     initial_camera = str(camera_details.get("initialCamera", "a")).lower()

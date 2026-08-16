@@ -17,6 +17,8 @@ import typer
 from adafruit_motor import stepper
 from adafruit_motorkit import MotorKit
 
+from remla.systemHelpers import resolve_i2c_bus
+
 pi = pigpio.pi()
 gpio.setmode(gpio.BCM)
 visaManager = visa.ResourceManager("@py")
@@ -1417,7 +1419,7 @@ class ArduCamMultiCamera(BaseController):
         self.experiment = None
         self.state = {}
         self.defaultSettings = defaultSettings
-        self.i2cbus = i2cbus
+        self.i2cbus = resolve_i2c_bus(i2cbus)
         self.cameraNames = cameraNamesDict
         self.initialCamera = initialCamera
 
@@ -1439,10 +1441,10 @@ class ArduCamMultiCamera(BaseController):
         }
 
         self.camerai2c = {
-            "a": "i2cset -y {0} 0x70 0x00 0x04".format(self.i2cbus),
-            "c": "i2cset -y {0} 0x70 0x00 0x06".format(self.i2cbus),
-            "d": "i2cset -y {0} 0x70 0x00 0x07".format(self.i2cbus),
-            "b": "i2cset -y {0} 0x70 0x00 0x05".format(self.i2cbus),
+            "a": "i2cset -f -y {0} 0x70 0x00 0x04".format(self.i2cbus),
+            "c": "i2cset -f -y {0} 0x70 0x00 0x06".format(self.i2cbus),
+            "d": "i2cset -f -y {0} 0x70 0x00 0x07".format(self.i2cbus),
+            "b": "i2cset -f -y {0} 0x70 0x00 0x05".format(self.i2cbus),
         }
 
         # Set camera for A
@@ -1735,6 +1737,8 @@ class PiCamera2MultiCam(BaseController):
 
         try:
             self.picam2.stop_recording()
+            self.encoder = None
+            self.output = None
         except Exception:
             self.logger.warning(
                 "Picamera2 stop_recording failed before switching from %s to %s",
@@ -1761,6 +1765,8 @@ class PiCamera2MultiCam(BaseController):
             try:
                 self._select_slot(previous_slot)
                 time.sleep(0.2)
+                self.encoder = None
+                self.output = None
                 self._build_stream_output()
                 self.picam2.start_recording(self.encoder, self.output)
                 self.state["camera"] = self.active_slot
