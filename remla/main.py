@@ -39,7 +39,7 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_show_locals=False)
 camera_app = typer.Typer(no_args_is_help=True)
 mediamtx_app = typer.Typer(no_args_is_help=True)
 app.add_typer(setupcmd.app, name="setup")
