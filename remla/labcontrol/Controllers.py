@@ -1,6 +1,7 @@
 import atexit
 import inspect
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -1560,6 +1561,7 @@ class PiCamera2MultiCam(BaseController):
         publisherStopTimeout=0.05,
         keepCameraManagerAlive=True,
         stopEncoderBeforeCamera=True,
+        fastFfmpegInput=True,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1584,6 +1586,7 @@ class PiCamera2MultiCam(BaseController):
         self.publisherStopTimeout = float(publisherStopTimeout)
         self.keepCameraManagerAlive = self._coerce_bool(keepCameraManagerAlive)
         self.stopEncoderBeforeCamera = self._coerce_bool(stopEncoderBeforeCamera)
+        self.fastFfmpegInput = self._coerce_bool(fastFfmpegInput)
         self.selection, self.enable1, self.enable2 = controlPins
         self.channels = controlPins
         gpio.setup(self.channels, gpio.OUT)
@@ -1632,15 +1635,63 @@ class PiCamera2MultiCam(BaseController):
             from picamera2 import Picamera2
             from picamera2.encoders import H264Encoder
             from picamera2.outputs import FfmpegOutput
+            from picamera2.outputs.output import Output
         except Exception as exc:
             raise RuntimeError(
                 "PiCamera2MultiCam requires Picamera2/libcamera packages on the Raspberry Pi runtime"
             ) from exc
 
+        class LowLatencyFfmpegOutput(FfmpegOutput):
+            def __init__(self, output_filename, input_fps=30):
+                super().__init__(output_filename)
+                self.input_fps = input_fps
+                self.fallback_attempted = False
+
+            def start(self):
+                import signal as signal_module
+
+                import prctl
+
+                command = [
+                    "ffmpeg",
+                    "-loglevel",
+                    "warning",
+                    "-y",
+                    "-f",
+                    "h264",
+                    "-framerate",
+                    str(self.input_fps),
+                    "-probesize",
+                    "64",
+                    "-analyzeduration",
+                    "0",
+                    "-use_wallclock_as_timestamps",
+                    "1",
+                    "-thread_queue_size",
+                    "8",
+                    "-i",
+                    "-",
+                    "-c:v",
+                    "copy",
+                ] + shlex.split(self.output_filename)
+                self.ffmpeg = subprocess.Popen(
+                    command,
+                    stdin=subprocess.PIPE,
+                    preexec_fn=lambda: prctl.set_pdeathsig(signal_module.SIGKILL),
+                )
+                Output.start(self)
+
+            def outputframe(self, frame, keyframe=True, timestamp=None, packet=None, audio=False):
+                super().outputframe(frame, keyframe, timestamp, packet, audio)
+                if self.recording and self.ffmpeg is None and not self.fallback_attempted:
+                    self.fallback_attempted = True
+                    FfmpegOutput.start(self)
+
         self._runtime = {
             "Picamera2": Picamera2,
             "H264Encoder": H264Encoder,
             "FfmpegOutput": FfmpegOutput,
+            "LowLatencyFfmpegOutput": LowLatencyFfmpegOutput,
             "Transform": Transform,
         }
         return self._runtime
@@ -1806,9 +1857,15 @@ class PiCamera2MultiCam(BaseController):
             f"-f rtsp -rtsp_transport tcp -flush_packets 1 "
             f"-muxdelay 0 -muxpreload 0 {self.streamUrl}"
         )
-        self.output = runtime["FfmpegOutput"](output_args)
+        if self.fastFfmpegInput:
+            self.output = runtime["LowLatencyFfmpegOutput"](output_args, input_fps=self.fps)
+        else:
+            self.output = runtime["FfmpegOutput"](output_args)
         if hasattr(self.output, "timeout"):
             self.output.timeout = self.publisherStopTimeout
+        self.output.error_callback = lambda exc: self.logger.error(
+            "FFmpeg camera publisher failed: %s", exc
+        )
 
     def _request_keyframe(self):
         if not self.forceKeyframeOnSwitch or self.encoder is None:
