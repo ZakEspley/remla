@@ -152,11 +152,10 @@ def moveAndOverwrite(source:Path, dest:Path):
     shutil.move(source, dest)
 
 def getSettings():
-    dir = Path(typer.get_app_dir(APP_NAME))
-    # with open(dir, "r") as file:
+    # with open(settingsDirectory, "r") as file:
     #     settingsString = file.read()
 
-    return yaml.load(dir/"settings.yml")
+    return yaml.load(settingsDirectory / "settings.yml")
 
 def clearDirectory(directory: Path) -> None:
     if directory.exists() and directory.is_dir():

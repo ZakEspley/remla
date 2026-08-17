@@ -10,11 +10,13 @@ apiAddress: 127.0.0.1:9997
 
 # Keep the local Picamera2 publisher simple and deterministic.
 rtsp: true
+rtspAddress: 127.0.0.1:8554
 rtspTransports: [tcp]
 
 # WHEP signaling is proxied by nginx. Media normally uses UDP, with TCP on
 # the same port as a fallback for restrictive internet connections.
 webrtc: true
+webrtcAddress: 127.0.0.1:8889
 webrtcLocalUDPAddress: :8189
 webrtcLocalTCPAddress: :8189
 webrtcICEServers2:

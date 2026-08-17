@@ -109,7 +109,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!activeSwitch || activeSwitch.switchId !== event.detail.switchId) return;
     const readyAt = event.detail.receivedAt;
     activeSwitch.readyAt = readyAt;
-    waitForPresentedFrames(5, () => {
+    waitForPresentedFrames(2, () => {
       if (!activeSwitch || activeSwitch.switchId !== event.detail.switchId) return;
       const displayedAt = performance.now();
       const timing = {

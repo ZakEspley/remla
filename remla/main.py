@@ -30,7 +30,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.3.dev21"
+__version__ = "0.3.3.dev22"
 
 
 def version_callback(value: bool):
@@ -64,8 +64,7 @@ def version(
 
 @app.command()
 def showconfig():
-    app_dir = typer.get_app_dir(APP_NAME)
-    typer.echo(app_dir)
+    typer.echo(settingsDirectory)
 
 
 def _install_remla_overlays() -> None:
