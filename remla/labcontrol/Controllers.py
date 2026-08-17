@@ -21,6 +21,7 @@ import typer
 from adafruit_motor import stepper
 from adafruit_motorkit import MotorKit
 
+from remla.mediamtx_camera import patch_camera_control
 from remla.systemHelpers import resolve_i2c_bus
 
 pi = pigpio.pi()
@@ -1416,6 +1417,9 @@ class ArduCamMultiCamera(BaseController):
         initialCamera="a",
         controlPins=[4, 17, 18],
         cameraNamesDict=None,
+        streamPath="cam",
+        mediamtxApiUrl="http://127.0.0.1:9997",
+        controlTimeout=2,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1426,6 +1430,9 @@ class ArduCamMultiCamera(BaseController):
         self.i2cbus = resolve_i2c_bus(i2cbus)
         self.cameraNames = cameraNamesDict
         self.initialCamera = initialCamera
+        self.streamPath = streamPath
+        self.mediamtxApiUrl = mediamtxApiUrl
+        self.controlTimeout = controlTimeout
 
         # Define Pins
         # Board Pin 7 = BCM Pin 4 = Selection
@@ -1493,14 +1500,23 @@ class ArduCamMultiCamera(BaseController):
         return param
 
     def imageMod(self, params):
-        imageControl = params[0]
-        controlValue = params[1]
-        subprocess.run(
-            "v4l2-ctl -d /dev/video{0} -c {1}={2}".format(
-                self.videoNumber, imageControl, controlValue
-            ),
-            shell=True,
-        )
+        image_control = params[0]
+        control_value = params[1]
+        try:
+            payload = patch_camera_control(
+                image_control,
+                control_value,
+                path=self.streamPath,
+                api_url=self.mediamtxApiUrl,
+                timeout=self.controlTimeout,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise RuntimeError(
+                "Camera imageMod failed for control '{0}' with value '{1}': {2}".format(
+                    image_control, control_value, exc
+                )
+            ) from exc
+        self.state.update(payload)
 
     def imageMod_parser(self, params):
         if len(params) != 2:

@@ -27,7 +27,7 @@
 
 ## Tests
 - There is an ad-hoc boot-time test script and standard-library unit tests.
-- Run all tests: `poetry run python tests/test.py && poetry run python -m unittest tests/test_mediamtx.py`
+- Run all tests: `poetry run python tests/test.py && poetry run python -m unittest tests/test_mediamtx.py tests/test_mediamtx_camera.py`
 - Run a single test: `poetry run python tests/test.py` (no pytest suite configured).
 - If you add a real test framework, update this section with exact commands.
 

@@ -3,12 +3,11 @@ logLevel: info
 logDestinations: [file]
 logFile: mediamtx.log
 
-# REMLA polls this local-only API to signal when the live camera publisher has
-# replaced the always-available offline segment.
+# REMLA uses this local-only API for native Raspberry Pi camera controls.
 api: true
 apiAddress: 127.0.0.1:9997
 
-# Keep the local Picamera2 publisher simple and deterministic.
+# Keep RTSP available for local diagnostics.
 rtsp: true
 rtspAddress: 127.0.0.1:8554
 rtspTransports: [tcp]
@@ -33,9 +32,14 @@ moq: false
 
 paths:
   cam:
-    source: publisher
-    # Preserve existing WHEP readers while Picamera2 and its RTSP publisher
-    # restart during a camera mux change.
+    source: rpiCamera
+    rpiCameraWidth: 1920
+    rpiCameraHeight: 1080
+    rpiCameraFPS: 30
+    rpiCameraBitrate: 5000000
+    rpiCameraIDRPeriod: 10
+    # Preserve existing WHEP readers if the native source briefly becomes
+    # unavailable during a camera mux change.
     alwaysAvailable: true
     alwaysAvailableTracks:
       - codec: H264
