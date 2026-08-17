@@ -1,6 +1,7 @@
 import atexit
 import inspect
 import os
+import queue
 import shlex
 import subprocess
 import sys
@@ -1564,6 +1565,7 @@ class PiCamera2MultiCam(BaseController):
         stopEncoderBeforeCamera=True,
         fastFfmpegInput=True,
         persistentPublisher=True,
+        persistentEncoder=True,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1590,6 +1592,9 @@ class PiCamera2MultiCam(BaseController):
         self.stopEncoderBeforeCamera = self._coerce_bool(stopEncoderBeforeCamera)
         self.fastFfmpegInput = self._coerce_bool(fastFfmpegInput)
         self.persistentPublisher = self._coerce_bool(persistentPublisher)
+        self.persistentEncoder = (
+            self._coerce_bool(persistentEncoder) and self.persistentPublisher
+        )
         self.selection, self.enable1, self.enable2 = controlPins
         self.channels = controlPins
         gpio.setup(self.channels, gpio.OUT)
@@ -1613,6 +1618,7 @@ class PiCamera2MultiCam(BaseController):
         self._last_encoder_stop_ms = 0.0
         self._last_camera_stop_ms = 0.0
         self._last_release_close_ms = 0.0
+        self._closing = False
 
         self._runtime = None
         self._camera_manager_keepalive_key = None
@@ -1644,6 +1650,47 @@ class PiCamera2MultiCam(BaseController):
                 "PiCamera2MultiCam requires Picamera2/libcamera packages on the Raspberry Pi runtime"
             ) from exc
 
+        class TrackedRequest:
+            def __init__(self, request, owner):
+                self.request = request
+                self.owner = owner
+
+            def release(self):
+                try:
+                    self.request.release()
+                finally:
+                    self.owner.mark_released()
+
+        class TrackedRequestQueue(queue.Queue):
+            def __init__(self):
+                super().__init__()
+                self.pending = 0
+                self.pending_lock = threading.Lock()
+                self.all_released = threading.Event()
+                self.all_released.set()
+
+            def put(self, item, block=True, timeout=None):
+                with self.pending_lock:
+                    self.pending += 1
+                    self.all_released.clear()
+                super().put(item, block, timeout)
+
+            def get(self, block=True, timeout=None):
+                return TrackedRequest(super().get(block, timeout), self)
+
+            def mark_released(self):
+                with self.pending_lock:
+                    self.pending -= 1
+                    if self.pending == 0:
+                        self.all_released.set()
+
+        class TrackedH264Encoder(H264Encoder):
+            def _start(self):
+                super()._start()
+                self.buf_frame = TrackedRequestQueue()
+                output = self.output
+                self.output_frame_base = getattr(output, "frame_counter", 0)
+
         class CameraFfmpegOutput(FfmpegOutput):
             def __init__(self, output_filename, input_fps=30, fast_input=True, persistent=True):
                 super().__init__(output_filename)
@@ -1652,6 +1699,7 @@ class PiCamera2MultiCam(BaseController):
                 self.persistent = persistent
                 self.last_restart_attempt = 0.0
                 self.generation_frame = threading.Event()
+                self.frame_counter = 0
 
             def start(self):
                 self.generation_frame.clear()
@@ -1702,6 +1750,9 @@ class PiCamera2MultiCam(BaseController):
                 else:
                     self.close_publisher()
 
+            def begin_generation(self):
+                self.generation_frame.clear()
+
             def close_publisher(self):
                 Output.stop(self)
                 process = self.ffmpeg
@@ -1723,8 +1774,9 @@ class PiCamera2MultiCam(BaseController):
                         process.wait(timeout=1)
 
             def outputframe(self, frame, keyframe=True, timestamp=None, packet=None, audio=False):
+                self.frame_counter += 1
                 super().outputframe(frame, keyframe, timestamp, packet, audio)
-                if self.recording and self.ffmpeg is not None:
+                if self.recording and self.ffmpeg is not None and keyframe:
                     self.generation_frame.set()
                 now = time.monotonic()
                 if self.recording and self.ffmpeg is None and now - self.last_restart_attempt >= 1:
@@ -1739,6 +1791,7 @@ class PiCamera2MultiCam(BaseController):
         self._runtime = {
             "Picamera2": Picamera2,
             "H264Encoder": H264Encoder,
+            "TrackedH264Encoder": TrackedH264Encoder,
             "FfmpegOutput": FfmpegOutput,
             "CameraFfmpegOutput": CameraFfmpegOutput,
             "Transform": Transform,
@@ -1847,17 +1900,58 @@ class PiCamera2MultiCam(BaseController):
 
     def _release_camera(self):
         if self.picam2 is None:
+            if self._closing and self.encoder is not None and getattr(self.encoder, "_running", False):
+                try:
+                    self.encoder.stop()
+                except Exception:
+                    self.logger.warning("Persistent H264 encoder shutdown failed", exc_info=True)
+                    raise
+                self.encoder = None
             self._last_release_stop_ms = 0.0
             self._last_encoder_stop_ms = 0.0
             self._last_camera_stop_ms = 0.0
             self._last_release_close_ms = 0.0
             return
         started_at = time.monotonic()
-        if self.stopEncoderBeforeCamera:
+        keep_encoder = (
+            self.persistentEncoder
+            and not self._closing
+            and self.encoder is not None
+            and getattr(self.encoder, "_running", False)
+        )
+        if keep_encoder:
+            try:
+                with self.picam2.lock:
+                    self.picam2.encoders.discard(self.encoder)
+            except Exception:
+                self.logger.warning(
+                    "Could not detach persistent H264 encoder; using full encoder restart",
+                    exc_info=True,
+                )
+                keep_encoder = False
+
+        if keep_encoder and not self._drain_persistent_encoder():
+            with self.picam2.lock:
+                self.picam2.encoders.add(self.encoder)
+            raise RuntimeError("Persistent H264 encoder did not drain before camera switch")
+
+        if keep_encoder:
+            if hasattr(self.output, "begin_generation"):
+                self.output.begin_generation()
+            encoder_stopped_at = started_at
+            try:
+                self.picam2.stop()
+            except Exception:
+                self.logger.debug("Picamera2 stop skipped", exc_info=True)
+            stopped_at = time.monotonic()
+            self._last_encoder_stop_ms = 0.0
+            self._last_camera_stop_ms = (stopped_at - encoder_stopped_at) * 1000
+        elif self.stopEncoderBeforeCamera:
             try:
                 self.picam2.stop_encoder()
             except Exception:
-                self.logger.debug("Picamera2 stop_encoder skipped", exc_info=True)
+                self.logger.warning("Picamera2 stop_encoder failed", exc_info=True)
+                raise
             encoder_stopped_at = time.monotonic()
             try:
                 self.picam2.stop()
@@ -1882,14 +1976,46 @@ class PiCamera2MultiCam(BaseController):
         self._last_release_stop_ms = (stopped_at - started_at) * 1000
         self._last_release_close_ms = (closed_at - stopped_at) * 1000
         self.picam2 = None
-        self.encoder = None
+        if not keep_encoder:
+            self.encoder = None
         if not self.persistentPublisher:
             self.output = None
+
+    def _drain_persistent_encoder(self, timeout=0.3):
+        frame_queue = getattr(self.encoder, "buf_frame", None)
+        all_released = getattr(frame_queue, "all_released", None)
+        if all_released is None:
+            return False
+        deadline = time.monotonic() + timeout
+        target_frame_count = (
+            getattr(self.encoder, "output_frame_base", 0)
+            + getattr(self.encoder, "frames_encoded", 0)
+        )
+        while time.monotonic() < deadline:
+            if (
+                all_released.is_set()
+                and getattr(self.output, "frame_counter", 0) >= target_frame_count
+            ):
+                return True
+            time.sleep(0.002)
+        return False
+
+    def _encoder_matches_camera(self):
+        config = self.picam2.camera_configuration().get("main", {})
+        return (
+            tuple(getattr(self.encoder, "size", ())) == tuple(config.get("size", ()))
+            and getattr(self.encoder, "format", None) == config.get("format")
+            and getattr(self.encoder, "stride", None) == config.get("stride")
+        )
 
     def _build_stream_output(self):
         runtime = self._ensure_runtime()
         if self.encoder is None:
-            encoder_cls = runtime["H264Encoder"]
+            encoder_cls = (
+                runtime["TrackedH264Encoder"]
+                if self.persistentEncoder
+                else runtime["H264Encoder"]
+            )
             encoder_args = {"bitrate": self.bitrate}
             try:
                 encoder_params = inspect.signature(encoder_cls).parameters
@@ -1925,7 +2051,7 @@ class PiCamera2MultiCam(BaseController):
 
     def _request_keyframe(self):
         if not self.forceKeyframeOnSwitch or self.encoder is None:
-            return
+            return False
         for method_name in ("request_key_frame", "force_key_frame", "force_keyframe"):
             method = getattr(self.encoder, method_name, None)
             if method is None:
@@ -1933,9 +2059,29 @@ class PiCamera2MultiCam(BaseController):
             try:
                 method()
                 self.logger.info("Requested H264 keyframe with %s", method_name)
-                return
+                return True
             except Exception:
                 self.logger.debug("H264 keyframe request via %s failed", method_name, exc_info=True)
+        try:
+            import fcntl
+            from videodev2 import (
+                V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME,
+                VIDIOC_S_CTRL,
+                v4l2_control,
+            )
+
+            video_device = getattr(self.encoder, "vd", None)
+            if video_device is None:
+                return False
+            control = v4l2_control()
+            control.id = V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME
+            control.value = 1
+            fcntl.ioctl(video_device, VIDIOC_S_CTRL, control)
+            self.logger.info("Requested H264 keyframe through V4L2")
+            return True
+        except Exception:
+            self.logger.debug("H264 keyframe request through V4L2 failed", exc_info=True)
+            return False
 
     def _switch_camera_hot(self, slot, apply_defaults=False):
         if slot == "off":
@@ -2055,8 +2201,30 @@ class PiCamera2MultiCam(BaseController):
         opened_at = time.monotonic()
         self.picam2.configure(self._build_video_config())
         configured_at = time.monotonic()
+        encoder_is_running = (
+            self.persistentEncoder
+            and self.encoder is not None
+            and getattr(self.encoder, "_running", False)
+        )
+        if encoder_is_running and not self._encoder_matches_camera():
+            self.logger.warning("Camera stream configuration changed; restarting H264 encoder")
+            self.encoder.stop()
+            self.encoder = None
+            encoder_is_running = False
         self._build_stream_output()
-        self.picam2.start_recording(self.encoder, self.output)
+        if encoder_is_running:
+            self.picam2.encoders = self.encoder
+            if self._request_keyframe():
+                self.picam2.start()
+            else:
+                with self.picam2.lock:
+                    self.picam2.encoders.discard(self.encoder)
+                self.encoder.stop()
+                self.encoder = None
+                self._build_stream_output()
+                self.picam2.start_recording(self.encoder, self.output)
+        else:
+            self.picam2.start_recording(self.encoder, self.output)
         recording_at = time.monotonic()
         if apply_defaults and self.defaultSettings:
             self._apply_controls(self.defaultSettings)
@@ -2170,6 +2338,7 @@ class PiCamera2MultiCam(BaseController):
 
     def close(self):
         atexit.unregister(self.close)
+        self._closing = True
         self._release_camera()
         if self.output is not None and hasattr(self.output, "close_publisher"):
             self.output.close_publisher()
