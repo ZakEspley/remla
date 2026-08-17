@@ -1420,7 +1420,6 @@ class ArduCamMultiCamera(BaseController):
         streamPath="cam",
         mediamtxApiUrl="http://127.0.0.1:9997",
         controlTimeout=2,
-        cameraSwitchMode="hot",
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1434,7 +1433,6 @@ class ArduCamMultiCamera(BaseController):
         self.streamPath = streamPath
         self.mediamtxApiUrl = mediamtxApiUrl
         self.controlTimeout = controlTimeout
-        self.cameraSwitchMode = str(cameraSwitchMode).strip().lower()
 
         # Define Pins
         # Board Pin 7 = BCM Pin 4 = Selection

@@ -1,10 +1,13 @@
+from collections import defaultdict
+from pathlib import Path, PosixPath, PurePosixPath, PurePath
+from typing import Any, List
+
 import typer
 from ruamel.yaml import YAML
 from ruamel.yaml.nodes import ScalarNode
-from pathlib import Path, PosixPath, PurePosixPath, PurePath
-from typing import List, Any
+
+from remla.device_config import validate_device_arguments
 from remla.labcontrol import Controllers
-from collections import defaultdict
 
 
 # Initialize the YAML parser
@@ -82,6 +85,7 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
         # cls = globals()[deviceDetails['type']]
         cls = getattr(Controllers, deviceDetails['type'])
         initArgs = {k: v for k, v in deviceDetails.items() if k not in ['type', 'name']}
+        validate_device_arguments(deviceName, cls, initArgs)
 
         # Resolve dependencies for each initialization argument
         for arg, value in initArgs.items():
