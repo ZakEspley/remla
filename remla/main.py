@@ -795,11 +795,15 @@ def run(
     print(f"########{now.center(64)}########")
     print("#" * 80)
     print()
-    if status():
+    include_service = "INVOCATION_ID" not in os.environ
+    if _is_remla_running(include_service=include_service):
         warning(
             "Remla is already running. If you want to restart run `remla restart` or stop before running with new options."
         )
         raise typer.Abort()
+    if foreground or wstest:
+        pidFilePath.parent.mkdir(parents=True, exist_ok=True)
+        pidFilePath.write_text(str(os.getpid()))
     signal.signal(signal.SIGTERM, lambda signum, frame: cleanupPID())
     signal.signal(signal.SIGINT, lambda signum, frame: cleanupPID())
     # perform initial camera cycling once per boot (if configured)
@@ -907,36 +911,58 @@ def stop():
             "Stopping remla. This could take some time for the system to reset to its starting parameters. Please be patient."
         )
         subprocess.run(["systemctl", "stop", "remla.service"], check=True)
+        pid = _read_remla_pid()
+        if pid is not None and _pid_is_remla(pid):
+            os.kill(pid, signal.SIGTERM)
+        pidFilePath.unlink(missing_ok=True)
         success("Stopped running remla")
-    except subprocess.CalledProcessError:
-        alert("Failed to stop remla")
+    except (OSError, subprocess.CalledProcessError) as exc:
+        alert(f"Failed to stop remla: {exc}")
+
+
+def _read_remla_pid() -> Optional[int]:
+    try:
+        return int(pidFilePath.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def _pid_is_remla(pid: int) -> bool:
+    try:
+        command = (Path("/proc") / str(pid) / "cmdline").read_bytes().replace(b"\0", b" ")
+    except (FileNotFoundError, PermissionError, ProcessLookupError):
+        return False
+    return b"remla" in command and (b" run" in command or b" start" in command)
+
+
+def _remla_service_is_active() -> bool:
+    return (
+        subprocess.run(
+            ["systemctl", "is-active", "--quiet", "remla.service"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+
+
+def _is_remla_running(include_service: bool = True) -> bool:
+    pid = _read_remla_pid()
+    if pid is not None:
+        if _pid_is_remla(pid):
+            return True
+        pidFilePath.unlink(missing_ok=True)
+    return include_service and _remla_service_is_active()
 
 
 @app.command()
 def status():
-    # pidFilePathFull = pidFilePath.replace("<uid>", str(getCallingUserID()))
-    print(pidFilePath)
-    if os.path.exists(pidFilePath):
-        # Read exisitng pid file
-        with open(pidFilePath, "r") as file:
-            try:
-                pid = int(file.read().strip())
-                os.kill(pid, 0)
-                typer.echo("Remla is already running")
-                return True
-            except ValueError:
-                typer.echo("PID File is corrupt. Starting a new instance.")
-            except ProcessLookupError:
-                typer.echo("Remla instance not found. Staring new isntance")
-            except PermissionError:
-                typer.echo("Permission denied when checking PID. Assuming its running.")
-                return True
+    running = _is_remla_running()
+    if running:
+        typer.echo("Remla is running")
     else:
-        typer.echo("No PID file found. Starting new instance of remla")
-
-    with open(pidFilePath, "w+") as file:
-        file.write(str(os.getpid()))
-    return False
+        typer.echo("Remla is not running")
+    return running
 
 
 @app.command()

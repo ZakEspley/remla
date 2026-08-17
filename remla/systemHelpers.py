@@ -297,8 +297,11 @@ WantedBy=multi-user.target
 
 def cleanupPID():
     typer.echo("Cleaning up...")
-    if os.path.exists(pidFilePath):
-        os.remove(pidFilePath)
+    try:
+        if int(pidFilePath.read_text().strip()) == os.getpid():
+            pidFilePath.unlink()
+    except (FileNotFoundError, ValueError):
+        pass
     sys.exit(0)
 
 def getCallingUserID():
