@@ -1565,8 +1565,8 @@ class PiCamera2MultiCam(BaseController):
         stopEncoderBeforeCamera=True,
         fastFfmpegInput=True,
         persistentPublisher=True,
-        persistentEncoder=True,
-        persistentAllocator=True,
+        persistentEncoder=False,
+        persistentAllocator=False,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
