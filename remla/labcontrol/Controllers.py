@@ -1559,6 +1559,7 @@ class PiCamera2MultiCam(BaseController):
         h264Profile="constrained baseline",
         publisherStopTimeout=0.05,
         keepCameraManagerAlive=True,
+        stopEncoderBeforeCamera=True,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1582,6 +1583,7 @@ class PiCamera2MultiCam(BaseController):
         self.h264Profile = str(h264Profile)
         self.publisherStopTimeout = float(publisherStopTimeout)
         self.keepCameraManagerAlive = self._coerce_bool(keepCameraManagerAlive)
+        self.stopEncoderBeforeCamera = self._coerce_bool(stopEncoderBeforeCamera)
         self.selection, self.enable1, self.enable2 = controlPins
         self.channels = controlPins
         gpio.setup(self.channels, gpio.OUT)
@@ -1602,6 +1604,8 @@ class PiCamera2MultiCam(BaseController):
         self.encoder = None
         self.output = None
         self._last_release_stop_ms = 0.0
+        self._last_encoder_stop_ms = 0.0
+        self._last_camera_stop_ms = 0.0
         self._last_release_close_ms = 0.0
 
         self._runtime = None
@@ -1744,14 +1748,32 @@ class PiCamera2MultiCam(BaseController):
     def _release_camera(self):
         if self.picam2 is None:
             self._last_release_stop_ms = 0.0
+            self._last_encoder_stop_ms = 0.0
+            self._last_camera_stop_ms = 0.0
             self._last_release_close_ms = 0.0
             return
         started_at = time.monotonic()
-        try:
-            self.picam2.stop_recording()
-        except Exception:
-            self.logger.debug("Picamera2 stop_recording skipped", exc_info=True)
-        stopped_at = time.monotonic()
+        if self.stopEncoderBeforeCamera:
+            try:
+                self.picam2.stop_encoder()
+            except Exception:
+                self.logger.debug("Picamera2 stop_encoder skipped", exc_info=True)
+            encoder_stopped_at = time.monotonic()
+            try:
+                self.picam2.stop()
+            except Exception:
+                self.logger.debug("Picamera2 stop skipped", exc_info=True)
+            stopped_at = time.monotonic()
+            self._last_encoder_stop_ms = (encoder_stopped_at - started_at) * 1000
+            self._last_camera_stop_ms = (stopped_at - encoder_stopped_at) * 1000
+        else:
+            try:
+                self.picam2.stop_recording()
+            except Exception:
+                self.logger.debug("Picamera2 stop_recording skipped", exc_info=True)
+            stopped_at = time.monotonic()
+            self._last_encoder_stop_ms = 0.0
+            self._last_camera_stop_ms = 0.0
         try:
             self.picam2.close()
         except Exception:
@@ -1927,11 +1949,14 @@ class PiCamera2MultiCam(BaseController):
         self.state["camera"] = self.active_slot
         self.logger.info(
             "Camera restart timing slot=%s release=%.1fms recording_stop=%.1fms "
-            "camera_close=%.1fms select=%.1fms open=%.1fms configure=%.1fms "
+            "encoder_stop=%.1fms camera_stop=%.1fms camera_close=%.1fms "
+            "select=%.1fms open=%.1fms configure=%.1fms "
             "pipeline_start=%.1fms controls=%.1fms total=%.1fms",
             slot,
             (released_at - started_at) * 1000,
             self._last_release_stop_ms,
+            self._last_encoder_stop_ms,
+            self._last_camera_stop_ms,
             self._last_release_close_ms,
             (selected_at - released_at) * 1000,
             (opened_at - selected_at) * 1000,
