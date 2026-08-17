@@ -1556,6 +1556,7 @@ class PiCamera2MultiCam(BaseController):
         switchSettleTime=0.05,
         forceKeyframeOnSwitch=True,
         h264Profile="constrained baseline",
+        publisherStopTimeout=0.05,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1577,6 +1578,7 @@ class PiCamera2MultiCam(BaseController):
         self.switchSettleTime = float(switchSettleTime)
         self.forceKeyframeOnSwitch = self._coerce_bool(forceKeyframeOnSwitch)
         self.h264Profile = str(h264Profile)
+        self.publisherStopTimeout = float(publisherStopTimeout)
         self.selection, self.enable1, self.enable2 = controlPins
         self.channels = controlPins
         gpio.setup(self.channels, gpio.OUT)
@@ -1596,6 +1598,8 @@ class PiCamera2MultiCam(BaseController):
         self.picam2 = None
         self.encoder = None
         self.output = None
+        self._last_release_stop_ms = 0.0
+        self._last_release_close_ms = 0.0
 
         self._runtime = None
         self._ensure_runtime()
@@ -1707,15 +1711,22 @@ class PiCamera2MultiCam(BaseController):
 
     def _release_camera(self):
         if self.picam2 is None:
+            self._last_release_stop_ms = 0.0
+            self._last_release_close_ms = 0.0
             return
+        started_at = time.monotonic()
         try:
             self.picam2.stop_recording()
         except Exception:
             self.logger.debug("Picamera2 stop_recording skipped", exc_info=True)
+        stopped_at = time.monotonic()
         try:
             self.picam2.close()
         except Exception:
             self.logger.debug("Picamera2 close skipped", exc_info=True)
+        closed_at = time.monotonic()
+        self._last_release_stop_ms = (stopped_at - started_at) * 1000
+        self._last_release_close_ms = (closed_at - stopped_at) * 1000
         self.picam2 = None
         self.encoder = None
         self.output = None
@@ -1742,6 +1753,8 @@ class PiCamera2MultiCam(BaseController):
             f"-muxdelay 0 -muxpreload 0 {self.streamUrl}"
         )
         self.output = runtime["FfmpegOutput"](output_args)
+        if hasattr(self.output, "timeout"):
+            self.output.timeout = self.publisherStopTimeout
 
     def _request_keyframe(self):
         if not self.forceKeyframeOnSwitch or self.encoder is None:
@@ -1881,10 +1894,13 @@ class PiCamera2MultiCam(BaseController):
         controls_at = time.monotonic()
         self.state["camera"] = self.active_slot
         self.logger.info(
-            "Camera restart timing slot=%s release=%.1fms select=%.1fms open=%.1fms "
-            "configure=%.1fms pipeline_start=%.1fms controls=%.1fms total=%.1fms",
+            "Camera restart timing slot=%s release=%.1fms recording_stop=%.1fms "
+            "camera_close=%.1fms select=%.1fms open=%.1fms configure=%.1fms "
+            "pipeline_start=%.1fms controls=%.1fms total=%.1fms",
             slot,
             (released_at - started_at) * 1000,
+            self._last_release_stop_ms,
+            self._last_release_close_ms,
             (selected_at - released_at) * 1000,
             (opened_at - selected_at) * 1000,
             (configured_at - opened_at) * 1000,
