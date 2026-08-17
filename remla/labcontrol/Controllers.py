@@ -1566,6 +1566,7 @@ class PiCamera2MultiCam(BaseController):
         fastFfmpegInput=True,
         persistentPublisher=True,
         persistentEncoder=True,
+        persistentAllocator=True,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1595,6 +1596,7 @@ class PiCamera2MultiCam(BaseController):
         self.persistentEncoder = (
             self._coerce_bool(persistentEncoder) and self.persistentPublisher
         )
+        self.persistentAllocator = self._coerce_bool(persistentAllocator)
         self.selection, self.enable1, self.enable2 = controlPins
         self.channels = controlPins
         gpio.setup(self.channels, gpio.OUT)
@@ -1622,13 +1624,15 @@ class PiCamera2MultiCam(BaseController):
 
         self._runtime = None
         self._camera_manager_keepalive_key = None
-        self._ensure_runtime()
+        runtime = self._ensure_runtime()
+        self._camera_allocator = (
+            runtime["CameraPersistentAllocator"]() if self.persistentAllocator else None
+        )
         try:
             self._start_camera_manager_keepalive()
             self._start_camera(self._resolve_camera_param(initialCamera), apply_defaults=True)
         except Exception:
-            self._release_camera()
-            self._stop_camera_manager_keepalive()
+            self.close()
             raise
         atexit.register(self.close)
         self.state["camera"] = self.active_slot
@@ -1642,6 +1646,7 @@ class PiCamera2MultiCam(BaseController):
         try:
             from libcamera import Transform
             from picamera2 import Picamera2
+            from picamera2.allocators import PersistentAllocator
             from picamera2.encoders import H264Encoder
             from picamera2.outputs import FfmpegOutput
             from picamera2.outputs.output import Output
@@ -1690,6 +1695,41 @@ class PiCamera2MultiCam(BaseController):
                 self.buf_frame = TrackedRequestQueue()
                 output = self.output
                 self.output_frame_base = getattr(output, "frame_counter", 0)
+
+        class CameraPersistentAllocator(PersistentAllocator):
+            def allocate(self, libcamera_config, use_case):
+                cached = self.buffer_dict.get(use_case)
+                if cached is not None:
+                    cached_buffers = list(cached[2].values())
+                    compatible = len(cached_buffers) == len(libcamera_config) and all(
+                        len(buffers) == stream_config.buffer_count
+                        and all(
+                            buffer.planes[0].length >= stream_config.frame_size
+                            for buffer in buffers
+                        )
+                        for stream_config, buffers in zip(libcamera_config, cached_buffers)
+                    )
+                    if not compatible:
+                        self.deallocate(use_case)
+                        cached = None
+
+                super().allocate(libcamera_config, use_case)
+                if cached is not None:
+                    rebound_buffers = {
+                        stream_config.stream: buffers
+                        for stream_config, buffers in zip(
+                            libcamera_config,
+                            list(self.frame_buffers.values()),
+                        )
+                    }
+                    self.frame_buffers = rebound_buffers
+                    self.buffer_dict[use_case] = (
+                        self.open_fds,
+                        self.libcamera_fds,
+                        self.frame_buffers,
+                        self.mapped_buffers,
+                        self.mapped_buffers_used,
+                    )
 
         class CameraFfmpegOutput(FfmpegOutput):
             def __init__(self, output_filename, input_fps=30, fast_input=True, persistent=True):
@@ -1790,6 +1830,8 @@ class PiCamera2MultiCam(BaseController):
 
         self._runtime = {
             "Picamera2": Picamera2,
+            "PersistentAllocator": PersistentAllocator,
+            "CameraPersistentAllocator": CameraPersistentAllocator,
             "H264Encoder": H264Encoder,
             "TrackedH264Encoder": TrackedH264Encoder,
             "FfmpegOutput": FfmpegOutput,
@@ -2197,7 +2239,10 @@ class PiCamera2MultiCam(BaseController):
         selected_at = time.monotonic()
 
         picam_cls = runtime["Picamera2"]
-        self.picam2 = picam_cls(self.videoNumber) if self.videoNumber else picam_cls()
+        if self._camera_allocator is not None:
+            self.picam2 = picam_cls(self.videoNumber, allocator=self._camera_allocator)
+        else:
+            self.picam2 = picam_cls(self.videoNumber)
         opened_at = time.monotonic()
         self.picam2.configure(self._build_video_config())
         configured_at = time.monotonic()
@@ -2344,6 +2389,11 @@ class PiCamera2MultiCam(BaseController):
             self.output.close_publisher()
         self.output = None
         self._stop_camera_manager_keepalive()
+        if self._camera_allocator is not None:
+            self._camera_allocator.close()
+            if self._camera_allocator.dmaHeap is not None:
+                self._camera_allocator.dmaHeap.close()
+            self._camera_allocator = None
 
 
 class ElectronicScreen(BaseController):
