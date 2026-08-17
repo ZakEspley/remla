@@ -29,6 +29,7 @@
                     state,
                     pipelineMs: Number(pipelineMs),
                     onlineMs: Number(onlineMs),
+                    readyMs: Number(onlineMs),
                     receivedAt: performance.now(),
                 },
             }));

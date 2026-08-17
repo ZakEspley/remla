@@ -186,6 +186,7 @@ class Experiment(object):
             method in {"camera", "cameraName"}
             and device.__class__.__name__ == "PiCamera2MultiCam"
             and getattr(device, "cameraSwitchMode", "restart") != "hot"
+            and (not params or str(params[0]).lower() != "off")
         )
         switch_id = str(time.monotonic_ns()) if camera_switch else None
 
@@ -211,18 +212,25 @@ class Experiment(object):
                     raise
                 if camera_switch:
                     pipeline_ready_at = time.monotonic()
-                    online = await loop.run_in_executor(
-                        self.executor,
-                        waitForMediaMTXOnline,
-                        stream_path,
-                        previous_source_id,
-                    )
+                    persistent_publisher = getattr(device, "persistentPublisher", False)
+                    if persistent_publisher:
+                        online = await loop.run_in_executor(
+                            self.executor, device.waitForPublisherFrame
+                        )
+                    else:
+                        online = await loop.run_in_executor(
+                            self.executor,
+                            waitForMediaMTXOnline,
+                            stream_path,
+                            previous_source_id,
+                        )
                     online_at = time.monotonic()
                     pipeline_ms = round((pipeline_ready_at - switch_started_at) * 1000)
                     online_ms = round((online_at - switch_started_at) * 1000)
                     if online:
+                        state = "frame" if persistent_publisher else "online"
                         await self.sendCommandToAllClients(
-                            f"cameraSwitchReady/{switch_id}/online/{pipeline_ms}/{online_ms}"
+                            f"cameraSwitchReady/{switch_id}/{state}/{pipeline_ms}/{online_ms}"
                         )
                     else:
                         await self.sendCommandToAllClients(

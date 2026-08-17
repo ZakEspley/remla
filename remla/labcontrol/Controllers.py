@@ -4,6 +4,7 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
 import time
 import shutil
 from abc import ABC, ABCMeta, abstractmethod
@@ -1562,6 +1563,7 @@ class PiCamera2MultiCam(BaseController):
         keepCameraManagerAlive=True,
         stopEncoderBeforeCamera=True,
         fastFfmpegInput=True,
+        persistentPublisher=True,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1587,6 +1589,7 @@ class PiCamera2MultiCam(BaseController):
         self.keepCameraManagerAlive = self._coerce_bool(keepCameraManagerAlive)
         self.stopEncoderBeforeCamera = self._coerce_bool(stopEncoderBeforeCamera)
         self.fastFfmpegInput = self._coerce_bool(fastFfmpegInput)
+        self.persistentPublisher = self._coerce_bool(persistentPublisher)
         self.selection, self.enable1, self.enable2 = controlPins
         self.channels = controlPins
         gpio.setup(self.channels, gpio.OUT)
@@ -1641,13 +1644,24 @@ class PiCamera2MultiCam(BaseController):
                 "PiCamera2MultiCam requires Picamera2/libcamera packages on the Raspberry Pi runtime"
             ) from exc
 
-        class LowLatencyFfmpegOutput(FfmpegOutput):
-            def __init__(self, output_filename, input_fps=30):
+        class CameraFfmpegOutput(FfmpegOutput):
+            def __init__(self, output_filename, input_fps=30, fast_input=True, persistent=True):
                 super().__init__(output_filename)
                 self.input_fps = input_fps
-                self.fallback_attempted = False
+                self.fast_input = fast_input
+                self.persistent = persistent
+                self.last_restart_attempt = 0.0
+                self.generation_frame = threading.Event()
 
             def start(self):
+                self.generation_frame.clear()
+                if self.ffmpeg is not None and self.ffmpeg.poll() is None:
+                    Output.start(self)
+                    return
+                if not self.fast_input:
+                    FfmpegOutput.start(self)
+                    return
+
                 import signal as signal_module
 
                 import prctl
@@ -1681,17 +1695,52 @@ class PiCamera2MultiCam(BaseController):
                 )
                 Output.start(self)
 
+            def stop(self):
+                if self.persistent:
+                    self.generation_frame.clear()
+                    Output.stop(self)
+                else:
+                    self.close_publisher()
+
+            def close_publisher(self):
+                Output.stop(self)
+                process = self.ffmpeg
+                self.ffmpeg = None
+                if process is None:
+                    return
+                try:
+                    process.stdin.close()
+                except Exception:
+                    pass
+                try:
+                    process.wait(timeout=self.timeout)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=1)
+
             def outputframe(self, frame, keyframe=True, timestamp=None, packet=None, audio=False):
                 super().outputframe(frame, keyframe, timestamp, packet, audio)
-                if self.recording and self.ffmpeg is None and not self.fallback_attempted:
-                    self.fallback_attempted = True
-                    FfmpegOutput.start(self)
+                if self.recording and self.ffmpeg is not None:
+                    self.generation_frame.set()
+                now = time.monotonic()
+                if self.recording and self.ffmpeg is None and now - self.last_restart_attempt >= 1:
+                    self.last_restart_attempt = now
+                    self.fast_input = False
+                    try:
+                        FfmpegOutput.start(self)
+                    except Exception as exc:
+                        if self.error_callback:
+                            self.error_callback(exc)
 
         self._runtime = {
             "Picamera2": Picamera2,
             "H264Encoder": H264Encoder,
             "FfmpegOutput": FfmpegOutput,
-            "LowLatencyFfmpegOutput": LowLatencyFfmpegOutput,
+            "CameraFfmpegOutput": CameraFfmpegOutput,
             "Transform": Transform,
         }
         return self._runtime
@@ -1834,38 +1883,45 @@ class PiCamera2MultiCam(BaseController):
         self._last_release_close_ms = (closed_at - stopped_at) * 1000
         self.picam2 = None
         self.encoder = None
-        self.output = None
+        if not self.persistentPublisher:
+            self.output = None
 
     def _build_stream_output(self):
-        if self.encoder is not None and self.output is not None:
-            return
         runtime = self._ensure_runtime()
-        encoder_cls = runtime["H264Encoder"]
-        encoder_args = {"bitrate": self.bitrate}
-        try:
-            encoder_params = inspect.signature(encoder_cls).parameters
-            if "repeat" in encoder_params:
-                encoder_args["repeat"] = True
-            if "iperiod" in encoder_params:
-                encoder_args["iperiod"] = self.keyframeInterval
-            if "profile" in encoder_params:
-                encoder_args["profile"] = self.h264Profile
-        except (TypeError, ValueError):
-            pass
-        self.encoder = encoder_cls(**encoder_args)
-        output_args = (
-            f"-f rtsp -rtsp_transport tcp -flush_packets 1 "
-            f"-muxdelay 0 -muxpreload 0 {self.streamUrl}"
-        )
-        if self.fastFfmpegInput:
-            self.output = runtime["LowLatencyFfmpegOutput"](output_args, input_fps=self.fps)
-        else:
-            self.output = runtime["FfmpegOutput"](output_args)
-        if hasattr(self.output, "timeout"):
-            self.output.timeout = self.publisherStopTimeout
-        self.output.error_callback = lambda exc: self.logger.error(
-            "FFmpeg camera publisher failed: %s", exc
-        )
+        if self.encoder is None:
+            encoder_cls = runtime["H264Encoder"]
+            encoder_args = {"bitrate": self.bitrate}
+            try:
+                encoder_params = inspect.signature(encoder_cls).parameters
+                if "repeat" in encoder_params:
+                    encoder_args["repeat"] = True
+                if "iperiod" in encoder_params:
+                    encoder_args["iperiod"] = self.keyframeInterval
+                if "profile" in encoder_params:
+                    encoder_args["profile"] = self.h264Profile
+            except (TypeError, ValueError):
+                pass
+            self.encoder = encoder_cls(**encoder_args)
+        if self.output is None:
+            output_args = (
+                f"-f rtsp -rtsp_transport tcp -flush_packets 1 "
+                f"-muxdelay 0 -muxpreload 0 {self.streamUrl}"
+            )
+            self.output = runtime["CameraFfmpegOutput"](
+                output_args,
+                input_fps=self.fps,
+                fast_input=self.fastFfmpegInput,
+                persistent=self.persistentPublisher,
+            )
+            if hasattr(self.output, "timeout"):
+                self.output.timeout = self.publisherStopTimeout
+            self.output.error_callback = lambda exc: self.logger.error(
+                "FFmpeg camera publisher failed: %s", exc
+            )
+
+    def waitForPublisherFrame(self, timeout=3.0):
+        event = getattr(self.output, "generation_frame", None)
+        return event is not None and event.wait(timeout)
 
     def _request_keyframe(self):
         if not self.forceKeyframeOnSwitch or self.encoder is None:
@@ -1938,7 +1994,8 @@ class PiCamera2MultiCam(BaseController):
         try:
             self.picam2.stop_recording()
             self.encoder = None
-            self.output = None
+            if not self.persistentPublisher:
+                self.output = None
         except Exception:
             self.logger.warning(
                 "Picamera2 stop_recording failed before switching from %s to %s",
@@ -1964,7 +2021,8 @@ class PiCamera2MultiCam(BaseController):
             try:
                 self._select_slot(previous_slot)
                 self.encoder = None
-                self.output = None
+                if not self.persistentPublisher:
+                    self.output = None
                 self._build_stream_output()
                 self.picam2.start_recording(self.encoder, self.output)
                 self.state["camera"] = self.active_slot
@@ -2113,6 +2171,9 @@ class PiCamera2MultiCam(BaseController):
     def close(self):
         atexit.unregister(self.close)
         self._release_camera()
+        if self.output is not None and hasattr(self.output, "close_publisher"):
+            self.output.close_publisher()
+        self.output = None
         self._stop_camera_manager_keepalive()
 
 
