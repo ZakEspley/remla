@@ -320,7 +320,12 @@ def bothOrNoneAssigned(x, y):
     else:
         return False
 
-def select_arducam_channel_index(index: int, bus: int = 1, control_pins: list | None = None) -> bool:
+def select_arducam_channel_index(
+    index: int,
+    bus: int = 1,
+    control_pins: list | None = None,
+    settle_time: float = 0.1,
+) -> bool:
     """
     Select channel by zero-based index (0=a,1=b,2=c,3=d) using the same i2c bytes
     used by ArduCamMultiCamera.camerai2c.
@@ -396,7 +401,8 @@ def select_arducam_channel_index(index: int, bus: int = 1, control_pins: list | 
             "0x00",
             f"0x{val:02x}",
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(0.1)
+        if settle_time > 0:
+            time.sleep(settle_time)
         logger.info("Selected ArduCam channel %s on bus %s (i2c 0x%02x) wrote_gpio=%s", index, resolved_bus, val, wrote_gpio)
         return True
     except FileNotFoundError:

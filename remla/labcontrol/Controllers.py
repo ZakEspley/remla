@@ -1555,6 +1555,7 @@ class PiCamera2MultiCam(BaseController):
         keyframeInterval=10,
         switchSettleTime=0.05,
         forceKeyframeOnSwitch=True,
+        h264Profile="constrained baseline",
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1575,6 +1576,7 @@ class PiCamera2MultiCam(BaseController):
         self.keyframeInterval = int(keyframeInterval)
         self.switchSettleTime = float(switchSettleTime)
         self.forceKeyframeOnSwitch = self._coerce_bool(forceKeyframeOnSwitch)
+        self.h264Profile = str(h264Profile)
         self.selection, self.enable1, self.enable2 = controlPins
         self.channels = controlPins
         gpio.setup(self.channels, gpio.OUT)
@@ -1688,6 +1690,7 @@ class PiCamera2MultiCam(BaseController):
             index,
             bus=self.i2cbus,
             control_pins=list(self.channels),
+            settle_time=self.switchSettleTime,
         )
         if not ok:
             raise RuntimeError(f"Failed to select ArduCam channel '{slot}'")
@@ -1729,10 +1732,15 @@ class PiCamera2MultiCam(BaseController):
                 encoder_args["repeat"] = True
             if "iperiod" in encoder_params:
                 encoder_args["iperiod"] = self.keyframeInterval
+            if "profile" in encoder_params:
+                encoder_args["profile"] = self.h264Profile
         except (TypeError, ValueError):
             pass
         self.encoder = encoder_cls(**encoder_args)
-        output_args = f"-f rtsp -rtsp_transport tcp -muxdelay 0 -muxpreload 0 {self.streamUrl}"
+        output_args = (
+            f"-f rtsp -rtsp_transport tcp -flush_packets 1 "
+            f"-muxdelay 0 -muxpreload 0 {self.streamUrl}"
+        )
         self.output = runtime["FfmpegOutput"](output_args)
 
     def _request_keyframe(self):
@@ -1767,8 +1775,6 @@ class PiCamera2MultiCam(BaseController):
         self.logger.info("Hot-switching camera mux from %s to %s", previous_slot, slot)
         try:
             self._select_slot(slot)
-            if self.switchSettleTime > 0:
-                time.sleep(self.switchSettleTime)
             if apply_defaults and self.defaultSettings:
                 self._apply_controls(self.defaultSettings)
             self._request_keyframe()
@@ -1820,7 +1826,6 @@ class PiCamera2MultiCam(BaseController):
 
         try:
             self._select_slot(slot)
-            time.sleep(0.2)
             self._build_stream_output()
             self.picam2.start_recording(self.encoder, self.output)
             if apply_defaults and self.defaultSettings:
@@ -1834,7 +1839,6 @@ class PiCamera2MultiCam(BaseController):
             )
             try:
                 self._select_slot(previous_slot)
-                time.sleep(0.2)
                 self.encoder = None
                 self.output = None
                 self._build_stream_output()
@@ -1852,7 +1856,9 @@ class PiCamera2MultiCam(BaseController):
 
     def _start_camera(self, slot, apply_defaults=False):
         runtime = self._ensure_runtime()
+        started_at = time.monotonic()
         self._release_camera()
+        released_at = time.monotonic()
 
         if slot == "off":
             self._select_slot("off")
@@ -1860,16 +1866,32 @@ class PiCamera2MultiCam(BaseController):
             return
 
         self._select_slot(slot)
-        time.sleep(0.2)
+        selected_at = time.monotonic()
 
         picam_cls = runtime["Picamera2"]
         self.picam2 = picam_cls(self.videoNumber) if self.videoNumber else picam_cls()
+        opened_at = time.monotonic()
         self.picam2.configure(self._build_video_config())
+        configured_at = time.monotonic()
         self._build_stream_output()
         self.picam2.start_recording(self.encoder, self.output)
+        recording_at = time.monotonic()
         if apply_defaults and self.defaultSettings:
             self._apply_controls(self.defaultSettings)
+        controls_at = time.monotonic()
         self.state["camera"] = self.active_slot
+        self.logger.info(
+            "Camera restart timing slot=%s release=%.1fms select=%.1fms open=%.1fms "
+            "configure=%.1fms pipeline_start=%.1fms controls=%.1fms total=%.1fms",
+            slot,
+            (released_at - started_at) * 1000,
+            (selected_at - released_at) * 1000,
+            (opened_at - selected_at) * 1000,
+            (configured_at - opened_at) * 1000,
+            (recording_at - configured_at) * 1000,
+            (controls_at - recording_at) * 1000,
+            (controls_at - started_at) * 1000,
+        )
 
     def _apply_controls(self, controls):
         if self.picam2 is None:
