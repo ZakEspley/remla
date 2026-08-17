@@ -1,3 +1,4 @@
+import atexit
 import inspect
 import os
 import subprocess
@@ -1557,6 +1558,7 @@ class PiCamera2MultiCam(BaseController):
         forceKeyframeOnSwitch=True,
         h264Profile="constrained baseline",
         publisherStopTimeout=0.05,
+        keepCameraManagerAlive=True,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1579,6 +1581,7 @@ class PiCamera2MultiCam(BaseController):
         self.forceKeyframeOnSwitch = self._coerce_bool(forceKeyframeOnSwitch)
         self.h264Profile = str(h264Profile)
         self.publisherStopTimeout = float(publisherStopTimeout)
+        self.keepCameraManagerAlive = self._coerce_bool(keepCameraManagerAlive)
         self.selection, self.enable1, self.enable2 = controlPins
         self.channels = controlPins
         gpio.setup(self.channels, gpio.OUT)
@@ -1602,8 +1605,16 @@ class PiCamera2MultiCam(BaseController):
         self._last_release_close_ms = 0.0
 
         self._runtime = None
+        self._camera_manager_keepalive_key = None
         self._ensure_runtime()
-        self._start_camera(self._resolve_camera_param(initialCamera), apply_defaults=True)
+        try:
+            self._start_camera_manager_keepalive()
+            self._start_camera(self._resolve_camera_param(initialCamera), apply_defaults=True)
+        except Exception:
+            self._release_camera()
+            self._stop_camera_manager_keepalive()
+            raise
+        atexit.register(self.close)
         self.state["camera"] = self.active_slot
 
     def _ensure_runtime(self):
@@ -1629,6 +1640,27 @@ class PiCamera2MultiCam(BaseController):
             "Transform": Transform,
         }
         return self._runtime
+
+    def _start_camera_manager_keepalive(self):
+        if not self.keepCameraManagerAlive:
+            return
+        manager = getattr(self._ensure_runtime()["Picamera2"], "_cm", None)
+        if manager is None or not hasattr(manager, "add") or not hasattr(manager, "cleanup"):
+            self.logger.warning("Picamera2 CameraManager keepalive is unavailable")
+            return
+        self._camera_manager_keepalive_key = f"remla-{id(self)}"
+        manager.add(self._camera_manager_keepalive_key, self)
+        self.logger.info("Keeping Picamera2 CameraManager active between camera restarts")
+
+    def _stop_camera_manager_keepalive(self):
+        if self._camera_manager_keepalive_key is None:
+            return
+        manager = getattr(self._ensure_runtime()["Picamera2"], "_cm", None)
+        try:
+            manager.cleanup(self._camera_manager_keepalive_key)
+        except Exception:
+            self.logger.debug("Picamera2 CameraManager keepalive cleanup skipped", exc_info=True)
+        self._camera_manager_keepalive_key = None
 
     def _coerce_bool(self, value):
         if isinstance(value, bool):
@@ -1997,7 +2029,9 @@ class PiCamera2MultiCam(BaseController):
         self.state["camera"] = self.active_slot
 
     def close(self):
+        atexit.unregister(self.close)
         self._release_camera()
+        self._stop_camera_manager_keepalive()
 
 
 class ElectronicScreen(BaseController):
