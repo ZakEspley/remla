@@ -15,6 +15,7 @@ const parseBoolString = (str, defaultVal) => {
 window.addEventListener('DOMContentLoaded', () => {
 
   let defaultControls = false;
+  let reader = null;
   const video = document.getElementById('video');
   const message = document.getElementById('message');
   const setMessage = (str) => {
@@ -37,14 +38,30 @@ window.addEventListener('DOMContentLoaded', () => {
   };
 
   loadAttributesFromQuery();
-  new MediaMTXWebRTCReader({
-    url: new URL('whep', window.location.href) + window.location.search,
-    onError: (err) => {
-      setMessage(err);
-    },
-    onTrack: (evt) => {
-      setMessage('');
-      video.srcObject = evt.streams[0];
-    },
-  });
+
+  const startCameraFeed = () => {
+    if (reader !== null) {
+      reader.close();
+      reader = null;
+    }
+
+    video.srcObject = null;
+    setMessage('Reconnecting camera feed...');
+
+    reader = new MediaMTXWebRTCReader({
+      url: new URL('whep', window.location.href) + window.location.search,
+      onError: (err) => {
+        setMessage(err);
+      },
+      onTrack: (evt) => {
+        setMessage('');
+        video.srcObject = evt.streams[0];
+      },
+    });
+  };
+
+  window.restartCameraFeed = startCameraFeed;
+  window.addEventListener('remla:camera-feed-reload', startCameraFeed);
+
+  startCameraFeed();
 });

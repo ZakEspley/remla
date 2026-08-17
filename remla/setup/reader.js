@@ -327,6 +327,31 @@
       }
     };
 
+    close = () => {
+      this.state = 'closed';
+
+      if (this.restartTimeout !== null) {
+        window.clearTimeout(this.restartTimeout);
+        this.restartTimeout = null;
+      }
+
+      if (this.pc !== null) {
+        this.pc.close();
+        this.pc = null;
+      }
+
+      this.offerData = null;
+
+      if (this.sessionUrl !== null) {
+        fetch(this.sessionUrl, {
+          method: 'DELETE',
+        });
+        this.sessionUrl = null;
+      }
+
+      this.queuedCandidates = [];
+    };
+
     getNonAdvertisedCodecs = () => {
       return Promise.all([
         ['pcma/8000/2'],

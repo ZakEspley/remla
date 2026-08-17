@@ -13,6 +13,12 @@
     const url = getWebSocketUrl();
     const dataChannel = new WebSocket(url);
 
+    function handleServerMessage(event) {
+        if (event.data === 'COMMAND: reloadCamera') {
+            window.dispatchEvent(new CustomEvent('remla:camera-feed-reload'));
+        }
+    }
+
     // Make `dataChannel` accessible globally
     window.dataChannel = dataChannel;
 
@@ -21,6 +27,7 @@
         console.log('WebSocket connection established.');
     };
     dataChannel.onmessage = function(event) {
+        handleServerMessage(event);
         console.log('Message from server:', event.data);
     };
     dataChannel.onerror = function(error) {
@@ -33,7 +40,12 @@
     // Function to allow users to set custom event handlers
     window.setWebSocketHandlers = function(handlers) {
         if (handlers.onOpen) dataChannel.onopen = handlers.onOpen;
-        if (handlers.onMessage) dataChannel.onmessage = handlers.onMessage;
+        if (handlers.onMessage) {
+            dataChannel.onmessage = function(event) {
+                handleServerMessage(event);
+                handlers.onMessage(event);
+            };
+        }
         if (handlers.onError) dataChannel.onerror = handlers.onError;
         if (handlers.onClose) dataChannel.onclose = handlers.onClose;
     };

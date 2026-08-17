@@ -97,6 +97,9 @@
 
             ws.onmessage = function(event) {
                 document.getElementById('responseInput').value = event.data;
+                if (event.data === 'COMMAND: reloadCamera') {
+                    window.dispatchEvent(new CustomEvent('remla:camera-feed-reload'));
+                }
                 console.log('Message from server ', event.data);
             };
 

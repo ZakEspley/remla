@@ -1551,7 +1551,7 @@ class PiCamera2MultiCam(BaseController):
         bitrate=5000000,
         hflip=False,
         vflip=False,
-        cameraSwitchMode="hot",
+        cameraSwitchMode="restart",
         keyframeInterval=10,
         switchSettleTime=0.05,
         forceKeyframeOnSwitch=True,
