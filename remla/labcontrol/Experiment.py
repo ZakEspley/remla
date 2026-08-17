@@ -4,9 +4,13 @@ import logging
 import os
 import socket
 import threading
+import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from signal import SIGINT, signal
+from urllib.error import URLError
+from urllib.parse import quote
+from urllib.request import urlopen
 
 import RPi.GPIO as gpio
 import websockets
@@ -32,6 +36,27 @@ def runMethod(device, method, params):
     else:
         logging.error(f"Device {device} does not have a cmdHandler method")
         raise
+
+
+def getMediaMTXPath(path):
+    url = f"http://127.0.0.1:9997/v3/paths/get/{quote(path, safe='')}"
+    try:
+        with urlopen(url, timeout=0.25) as response:
+            return json.load(response)
+    except (OSError, URLError, ValueError):
+        return {}
+
+
+def waitForMediaMTXOnline(path, previous_source_id, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        path_state = getMediaMTXPath(path)
+        source = path_state.get("source") or {}
+        source_id = source.get("id")
+        if path_state.get("online", False) and source_id and source_id != previous_source_id:
+            return True
+        time.sleep(0.02)
+    return False
 
 
 class Experiment(object):
@@ -157,14 +182,52 @@ class Experiment(object):
         device = self.devices.get(deviceName)
         response_type = "MESSAGE"
         result = None
+        camera_switch = (
+            method in {"camera", "cameraName"}
+            and device.__class__.__name__ == "PiCamera2MultiCam"
+            and getattr(device, "cameraSwitchMode", "restart") != "hot"
+        )
+        switch_id = str(time.monotonic_ns()) if camera_switch else None
 
         lockGroupName = self.lockMapping.get(deviceName)
         if lockGroupName:
             async with self.lockGroups[lockGroupName]:
                 loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    self.executor, runMethod, device, method, params
-                )
+                if camera_switch:
+                    stream_path = getattr(device, "streamPath", "cam")
+                    path_state = await loop.run_in_executor(
+                        self.executor, getMediaMTXPath, stream_path
+                    )
+                    previous_source_id = (path_state.get("source") or {}).get("id")
+                    switch_started_at = time.monotonic()
+                    await self.sendCommandToAllClients(f"cameraSwitchStarted/{switch_id}")
+                try:
+                    response = await loop.run_in_executor(
+                        self.executor, runMethod, device, method, params
+                    )
+                except Exception:
+                    if camera_switch:
+                        await self.sendCommandToAllClients(f"cameraSwitchFailed/{switch_id}")
+                    raise
+                if camera_switch:
+                    pipeline_ready_at = time.monotonic()
+                    online = await loop.run_in_executor(
+                        self.executor,
+                        waitForMediaMTXOnline,
+                        stream_path,
+                        previous_source_id,
+                    )
+                    online_at = time.monotonic()
+                    pipeline_ms = round((pipeline_ready_at - switch_started_at) * 1000)
+                    online_ms = round((online_at - switch_started_at) * 1000)
+                    if online:
+                        await self.sendCommandToAllClients(
+                            f"cameraSwitchReady/{switch_id}/online/{pipeline_ms}/{online_ms}"
+                        )
+                    else:
+                        await self.sendCommandToAllClients(
+                            f"cameraSwitchFailed/{switch_id}/timeout/{pipeline_ms}/{online_ms}"
+                        )
                 if response is None:
                     result = None
                 elif isinstance(response, (list, tuple)):

@@ -13,6 +13,28 @@
     const url = getWebSocketUrl();
     const dataChannel = new WebSocket(url);
 
+    function handleServerMessage(event) {
+        const prefix = 'COMMAND: ';
+        if (!event.data.startsWith(prefix)) return;
+        const [command, switchId, state, pipelineMs, onlineMs] = event.data.slice(prefix.length).split('/');
+        const eventNames = {
+            cameraSwitchStarted: 'remla:camera-switch-started',
+            cameraSwitchReady: 'remla:camera-switch-ready',
+            cameraSwitchFailed: 'remla:camera-switch-failed',
+        };
+        if (eventNames[command]) {
+            window.dispatchEvent(new CustomEvent(eventNames[command], {
+                detail: {
+                    switchId,
+                    state,
+                    pipelineMs: Number(pipelineMs),
+                    onlineMs: Number(onlineMs),
+                    receivedAt: performance.now(),
+                },
+            }));
+        }
+    }
+
     // Make `dataChannel` accessible globally
     window.dataChannel = dataChannel;
 
@@ -21,6 +43,7 @@
         console.log('WebSocket connection established.');
     };
     dataChannel.onmessage = function(event) {
+        handleServerMessage(event);
         console.log('Message from server:', event.data);
     };
     dataChannel.onerror = function(error) {

@@ -3,6 +3,11 @@ logLevel: info
 logDestinations: [file]
 logFile: mediamtx.log
 
+# REMLA polls this local-only API to signal when the live camera publisher has
+# replaced the always-available offline segment.
+api: true
+apiAddress: 127.0.0.1:9997
+
 # Keep the local Picamera2 publisher simple and deterministic.
 rtsp: true
 rtspTransports: [tcp]
