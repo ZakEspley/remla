@@ -312,6 +312,10 @@ webrtcICEServers2:
   # the secret must be inserted into the password field.
   # username: ''
   # password: ''
+# Time to wait for the WebRTC handshake to complete.
+webrtcHandshakeTimeout: 3s
+# Maximum time to gather video tracks.
+webrtcTrackGatherTimeout: 500ms
 
 ###############################################
 # Global settings -> SRT server

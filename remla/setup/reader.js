@@ -267,7 +267,7 @@
     return frag;
   };
 
-  const retryPause = 2000;
+  const retryPause = 100;
 
   class MediaMTXWebRTCReader {
     constructor(conf) {
@@ -278,16 +278,13 @@
       this.offerData = null;
       this.sessionUrl = null;
       this.queuedCandidates = [];
+      this.nonAdvertisedCodecs = [];
 
-      this.getNonAdvertisedCodecs()
-        .then(() => this.start())
-        .catch((err) => {
-          this.handleError(err);
-        });
+      this.start();
     }
 
     handleError = (err) => {
-      if (this.state === 'restarting' || this.state === 'error') {
+      if (this.state === 'restarting' || this.state === 'closed') {
         return;
       }
 
@@ -307,23 +304,15 @@
 
       this.queuedCandidates = [];
 
-      if (this.state === 'running') {
-        this.state = 'restarting';
+      this.state = 'restarting';
 
-        this.restartTimeout = window.setTimeout(() => {
-          this.restartTimeout = null;
-          this.start();
-        }, retryPause);
+      this.restartTimeout = window.setTimeout(() => {
+        this.restartTimeout = null;
+        this.start();
+      }, retryPause);
 
-        if (this.conf.onError !== undefined) {
-          this.conf.onError(err + ', retrying in some seconds');
-        }
-      } else {
-        this.state = 'error';
-
-        if (this.conf.onError !== undefined) {
-          this.conf.onError(err);
-        }
+      if (this.conf.onError !== undefined) {
+        this.conf.onError(err + ', reconnecting');
       }
     };
 
@@ -391,9 +380,8 @@
         sdpSemantics: 'unified-plan',
       });
 
-      const direction = 'sendrecv';
+      const direction = 'recvonly';
       this.pc.addTransceiver('video', { direction });
-      this.pc.addTransceiver('audio', { direction });
 
       this.pc.onicecandidate = (evt) => this.onLocalCandidate(evt);
       this.pc.oniceconnectionstatechange = () => this.onConnectionState();

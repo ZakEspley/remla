@@ -37,6 +37,14 @@ window.addEventListener('DOMContentLoaded', () => {
     defaultControls = video.controls;
   };
 
+  const getWhepUrl = () => {
+    const url = new URL('whep', window.location.href);
+    const params = new URLSearchParams(window.location.search);
+    params.set('remla_reload', Date.now().toString());
+    url.search = params.toString();
+    return url.toString();
+  };
+
   loadAttributesFromQuery();
 
   const startCameraFeed = () => {
@@ -49,7 +57,7 @@ window.addEventListener('DOMContentLoaded', () => {
     setMessage('Reconnecting camera feed...');
 
     reader = new MediaMTXWebRTCReader({
-      url: new URL('whep', window.location.href) + window.location.search,
+      url: getWhepUrl(),
       onError: (err) => {
         setMessage(err);
       },
