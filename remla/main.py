@@ -6,6 +6,8 @@ import shutil
 import signal
 import socket
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -20,6 +22,7 @@ from typing_extensions import Annotated
 from remla import i2ccmd, setupcmd
 from remla.labcontrol.Controllers import *
 from remla.labcontrol.Experiment import Experiment
+from remla.mediamtx import MediaMTXInstallError, install_latest
 from remla.settings import *
 from remla.systemHelpers import *
 from remla.typerHelpers import *
@@ -27,7 +30,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.3.dev13"
+__version__ = "0.3.3.dev14"
 
 
 def version_callback(value: bool):
@@ -38,9 +41,11 @@ def version_callback(value: bool):
 
 app = typer.Typer()
 camera_app = typer.Typer(no_args_is_help=True)
+mediamtx_app = typer.Typer(no_args_is_help=True)
 app.add_typer(setupcmd.app, name="setup")
 app.add_typer(i2ccmd.app, name="i2c")
 app.add_typer(camera_app, name="camera")
+app.add_typer(mediamtx_app, name="mediamtx")
 
 
 @app.callback()
@@ -312,56 +317,150 @@ def init():
     # run(wstest=True)
 
 
-def _mediamtx():
-    remlaPanel("Installing MediaMTX")
-    typer.echo("  Checking for prior installation")
-    mediamtxInstalled = False
-    if os.path.exists("/usr/local/bin/mediamtx"):
-        typer.echo("  Already found Mediamtx Installation")
-        mediamtxInstalled = True
-    else:
-        echoResult(
-            download_and_extract_tar(mediaMTX_tar_file, settingsDirectory, "mediamtx"),
-            "Downloaded and extracted MediaMTX",
-            "Something went wrong in the downloading and extracting process. Check internet and try again.",
-        )
-    typer.echo("  Creating MediaMTX Systemlinks to fix LibCameraBug")
-    typer.echo("  Creating MediaMTX settings file")
-    # Change log file location in mediamtx.yml settings file.
-    # Then save the new mediamtx.yml file to /usr/local/etc where mediamtx says to locate
-    # the file.
-    mediamtxSettings = yaml.load(setupDirectory / "mediamtx.yml")
-    mediamtxSettings["logFile"] = str(logsDirectory / "mediamtx.log")
-    encryptionValue = mediamtxSettings["encryption"]
-    rtmpEncryptionValue = mediamtxSettings["rtmpEncryption"]
-    mediamtxSettings["encryption"] = "<replace1>"
-    mediamtxSettings["rtmpEncryption"] = "<replace2>"
-    mediamtxSettingsLocation = Path("/usr/local/etc")
-    (mediamtxSettingsLocation / "mediamtx.yml").unlink(missing_ok=True)
-
+def _write_mediamtx_settings():
+    mediamtx_settings = yaml.load(setupDirectory / "mediamtx.yml")
+    mediamtx_settings["logFile"] = str(logsDirectory / "mediamtx.log")
     mediamtxSettingsLocation.mkdir(parents=True, exist_ok=True)
-    yaml.dump(mediamtxSettings, mediamtxSettingsLocation / "mediamtx.yml")
-    with open(mediamtxSettingsLocation / "mediamtx.yml", "r") as file:
-        content = file.read()
-    content = content.replace("<replace1>", f'"{encryptionValue}"')
-    content = content.replace("<replace2>", f'"{rtmpEncryptionValue}"')
-    with open(mediamtxSettingsLocation / "mediamtx.yml", "w") as file:
-        file.write(content)
+    target = mediamtxSettingsLocation / "mediamtx.yml"
+    if target.exists():
+        shutil.copy2(target, target.with_suffix(".yml.previous"))
 
-    # Now move mediamtx binary to /usr/local/bin where mediamtx says to move it
-    if not mediamtxInstalled:
-        moveAndOverwrite(
-            settingsDirectory / "mediamtx/mediamtx", mediamtxBinaryLocation
-        )
-    # Move service file to systemd so that we can run it on boot.
-    shutil.copy(setupDirectory / "mediamtx.service", "/etc/systemd/system")
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        dir=mediamtxSettingsLocation,
+        prefix="mediamtx-",
+        suffix=".yml",
+        delete=False,
+    ) as temporary_file:
+        temporary_path = Path(temporary_file.name)
+        yaml.dump(mediamtx_settings, temporary_file)
+    os.replace(temporary_path, target)
 
-    # Finally setup systemd to run this service on start.
-    subprocess.run(["sudo", "systemctl", "daemon-reload"])
-    subprocess.run(["sudo", "systemctl", "enable", "mediamtx"])
-    subprocess.run(["sudo", "systemctl", "start", "mediamtx"])
-    subprocess.run(["sudo", "systemctl", "restart", "mediamtx"])
-    success("Successfully set up mediamtx")
+
+def _restore_file(target: Path, backup: Path, existed: bool):
+    if existed:
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent,
+            prefix=f".{target.name}-restore-",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+        try:
+            shutil.copy2(backup, temporary_path)
+            os.replace(temporary_path, target)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+    else:
+        target.unlink(missing_ok=True)
+
+
+def _restore_mediamtx_installation(
+    backup_directory: Path,
+    had_binary: bool,
+    had_settings: bool,
+    had_service: bool,
+    service_was_active: bool,
+    service_was_enabled: bool,
+    remla_was_active: bool,
+):
+    binary = mediamtxBinaryLocation / "mediamtx"
+    settings = mediamtxSettingsLocation / "mediamtx.yml"
+    service = Path("/etc/systemd/system/mediamtx.service")
+    if not had_service:
+        subprocess.run(["systemctl", "disable", "--now", "mediamtx"], check=False)
+    _restore_file(binary, backup_directory / "mediamtx", had_binary)
+    _restore_file(settings, backup_directory / "mediamtx.yml", had_settings)
+    _restore_file(service, backup_directory / "mediamtx.service", had_service)
+
+    subprocess.run(["systemctl", "daemon-reload"], check=True)
+    if service_was_enabled:
+        subprocess.run(["systemctl", "enable", "mediamtx"], check=True)
+    elif had_service:
+        subprocess.run(["systemctl", "disable", "mediamtx"], check=True)
+    if service_was_active:
+        subprocess.run(["systemctl", "restart", "mediamtx"], check=True)
+    elif had_service:
+        subprocess.run(["systemctl", "stop", "mediamtx"], check=True)
+    if remla_was_active:
+        subprocess.run(["systemctl", "restart", "remla.service"], check=True)
+
+
+def _mediamtx():
+    remlaPanel("Installing the latest MediaMTX release")
+    binary = mediamtxBinaryLocation / "mediamtx"
+    settings = mediamtxSettingsLocation / "mediamtx.yml"
+    service = Path("/etc/systemd/system/mediamtx.service")
+    had_binary = binary.exists()
+    had_settings = settings.exists()
+    had_service = service.exists()
+    service_was_active = (
+        subprocess.run(["systemctl", "is-active", "--quiet", "mediamtx"]).returncode == 0
+    )
+    service_was_enabled = (
+        subprocess.run(["systemctl", "is-enabled", "--quiet", "mediamtx"]).returncode == 0
+    )
+    remla_was_active = (
+        subprocess.run(["systemctl", "is-active", "--quiet", "remla.service"]).returncode
+        == 0
+    )
+
+    with tempfile.TemporaryDirectory(prefix="remla-mediamtx-backup-") as backup_name:
+        backup_directory = Path(backup_name)
+        if had_binary:
+            shutil.copy2(binary, backup_directory / "mediamtx")
+        if had_settings:
+            shutil.copy2(settings, backup_directory / "mediamtx.yml")
+        if had_service:
+            shutil.copy2(service, backup_directory / "mediamtx.service")
+
+        try:
+            release = install_latest(mediamtxBinaryLocation)
+            success(f"Installed MediaMTX {release.version}")
+            typer.echo("Writing REMLA MediaMTX settings")
+            _write_mediamtx_settings()
+            shutil.copy(setupDirectory / "mediamtx.service", service)
+            subprocess.run(["systemctl", "daemon-reload"], check=True)
+            subprocess.run(["systemctl", "enable", "mediamtx"], check=True)
+            subprocess.run(["systemctl", "restart", "mediamtx"], check=True)
+            time.sleep(1)
+            subprocess.run(["systemctl", "is-active", "--quiet", "mediamtx"], check=True)
+            if remla_was_active:
+                subprocess.run(["systemctl", "restart", "remla.service"], check=True)
+        except (MediaMTXInstallError, OSError, subprocess.CalledProcessError) as exc:
+            try:
+                _restore_mediamtx_installation(
+                    backup_directory,
+                    had_binary,
+                    had_settings,
+                    had_service,
+                    service_was_active,
+                    service_was_enabled,
+                    remla_was_active,
+                )
+            except (OSError, subprocess.CalledProcessError) as rollback_exc:
+                alert(f"MediaMTX update failed and rollback also failed: {exc}; {rollback_exc}")
+            else:
+                alert(f"MediaMTX update failed and the previous installation was restored: {exc}")
+            raise typer.Abort() from exc
+
+    success(f"MediaMTX {release.version} is installed and running")
+    if remla_was_active:
+        success("Restarted the REMLA service")
+    return release
+
+
+@mediamtx_app.command(
+    "update", help="Install the latest MediaMTX release and REMLA configuration."
+)
+def mediamtx_update():
+    if os.geteuid() != 0:
+        alert("This command must be run as root.")
+        typer.echo("Try running:")
+        typer.echo("sudo remla mediamtx update")
+        raise typer.Abort()
+
+    logsDirectory.mkdir(parents=True, exist_ok=True)
+    _mediamtx()
 
 
 def _nginx():

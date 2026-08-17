@@ -69,7 +69,6 @@ window.addEventListener('DOMContentLoaded', () => {
   };
 
   window.restartCameraFeed = startCameraFeed;
-  window.addEventListener('remla:camera-feed-reload', startCameraFeed);
 
   startCameraFeed();
 });

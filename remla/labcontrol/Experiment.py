@@ -188,9 +188,6 @@ class Experiment(object):
         else:
             await self.sendMessage(websocket, f"{deviceName} ran {method}")
 
-        if self.shouldReloadCameraFeed(device, method):
-            await self.sendCommandToAllClients("reloadCamera")
-
     def startServer(self):
         # This function sets up and runs the WebSocket server indefinitely
         # loop = asyncio.new_event_loop()
@@ -225,12 +222,6 @@ class Experiment(object):
     async def sendCommandToAllClients(self, command: str):
         for client in list(self.clients):
             await self.sendCommandToClient(client, command)
-
-    def shouldReloadCameraFeed(self, device, method: str) -> bool:
-        return (
-            method in {"camera", "cameraName"}
-            and device.__class__.__name__ in {"PiCamera2MultiCam", "ArduCamMultiCamera"}
-        )
 
     def deviceNames(self):
         names = []
