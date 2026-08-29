@@ -1,10 +1,10 @@
 [tool.poetry]
 name = "remla"
-version = "0.3.2"
+version = "0.3.3.dev28"
 description = ""
 authors = ["Zak Espley <zespley@gmail.com>"]
 readme = "README.md"
-include = ["setup/*/**"]
+include = ["setup/*/**", "remla/overlays/**/*"]
 
 [tool.poetry.scripts]
 remla = "remla.main:app"

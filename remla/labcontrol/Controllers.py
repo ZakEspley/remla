@@ -1,8 +1,13 @@
+import atexit
 import inspect
 import os
+import queue
+import shlex
 import subprocess
 import sys
+import threading
 import time
+import shutil
 from abc import ABC, ABCMeta, abstractmethod
 from warnings import warn
 
@@ -15,6 +20,9 @@ import tplink_smarthome as tp
 import typer
 from adafruit_motor import stepper
 from adafruit_motorkit import MotorKit
+
+from remla.mediamtx_camera import patch_camera_control
+from remla.systemHelpers import resolve_i2c_bus
 
 pi = pigpio.pi()
 gpio.setmode(gpio.BCM)
@@ -94,13 +102,17 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
         # Now get the command method. If there isn't a method, it should throw an AttributeError.
         try:
             method = getattr(self, cmd)
-            print(method)
-            if callable(method):
-                response = method(params)
-                return response
-        except Exception as e:
+        except AttributeError as e:
             print(f"{self.__class__.__name__} does not have <{cmd}> cmd")
             raise e
+
+        print(method)
+        if not callable(method):
+            raise TypeError(
+                f"{self.__class__.__name__}.{cmd} exists but is not callable"
+            )
+
+        return method(params)
 
     @abstractmethod
     def reset(self):
@@ -1405,6 +1417,9 @@ class ArduCamMultiCamera(BaseController):
         initialCamera="a",
         controlPins=[4, 17, 18],
         cameraNamesDict=None,
+        streamPath="cam",
+        mediamtxApiUrl="http://127.0.0.1:9997",
+        controlTimeout=2,
     ):
         super().__init__(name)
         self.videoNumber = videoNumber
@@ -1412,9 +1427,12 @@ class ArduCamMultiCamera(BaseController):
         self.experiment = None
         self.state = {}
         self.defaultSettings = defaultSettings
-        self.i2cbus = i2cbus
+        self.i2cbus = resolve_i2c_bus(i2cbus)
         self.cameraNames = cameraNamesDict
         self.initialCamera = initialCamera
+        self.streamPath = streamPath
+        self.mediamtxApiUrl = mediamtxApiUrl
+        self.controlTimeout = controlTimeout
 
         # Define Pins
         # Board Pin 7 = BCM Pin 4 = Selection
@@ -1434,10 +1452,10 @@ class ArduCamMultiCamera(BaseController):
         }
 
         self.camerai2c = {
-            "a": "i2cset -y {0} 0x70 0x00 0x04".format(self.i2cbus),
-            "c": "i2cset -y {0} 0x70 0x00 0x06".format(self.i2cbus),
-            "d": "i2cset -y {0} 0x70 0x00 0x07".format(self.i2cbus),
-            "b": "i2cset -y {0} 0x70 0x00 0x05".format(self.i2cbus),
+            "a": "i2cset -f -y {0} 0x70 0x00 0x04".format(self.i2cbus),
+            "c": "i2cset -f -y {0} 0x70 0x00 0x06".format(self.i2cbus),
+            "d": "i2cset -f -y {0} 0x70 0x00 0x07".format(self.i2cbus),
+            "b": "i2cset -f -y {0} 0x70 0x00 0x05".format(self.i2cbus),
         }
 
         # Set camera for A
@@ -1482,14 +1500,23 @@ class ArduCamMultiCamera(BaseController):
         return param
 
     def imageMod(self, params):
-        imageControl = params[0]
-        controlValue = params[1]
-        subprocess.run(
-            "v4l2-ctl -d /dev/video{0} -c {1}={2}".format(
-                self.videoNumber, imageControl, controlValue
-            ),
-            shell=True,
-        )
+        image_control = params[0]
+        control_value = params[1]
+        try:
+            payload = patch_camera_control(
+                image_control,
+                control_value,
+                path=self.streamPath,
+                api_url=self.mediamtxApiUrl,
+                timeout=self.controlTimeout,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise RuntimeError(
+                "Camera imageMod failed for control '{0}' with value '{1}': {2}".format(
+                    image_control, control_value, exc
+                )
+            ) from exc
+        self.state.update(payload)
 
     def imageMod_parser(self, params):
         if len(params) != 2:
@@ -1502,6 +1529,887 @@ class ArduCamMultiCamera(BaseController):
             for setting, value in self.defaultSettings.items():
                 self.imageMod([setting, value])
                 time.sleep(0.1)
+
+
+class PiCamera2MultiCam(BaseController):
+    deviceType = "measurement"
+
+    CONTROL_MAPPINGS = {
+        "brightness": "Brightness",
+        "contrast": "Contrast",
+        "saturation": "Saturation",
+        "sharpness": "Sharpness",
+        "analoguegain": "AnalogueGain",
+        "gain": "AnalogueGain",
+        "exposuretime": "ExposureTime",
+        "exposure_time": "ExposureTime",
+        "exposure": "ExposureTime",
+        "awb": "AwbEnable",
+        "awbenable": "AwbEnable",
+        "colourgains": "ColourGains",
+        "awb_gains": "ColourGains",
+        "aeenable": "AeEnable",
+        "autoexposure": "AeEnable",
+        "lensposition": "LensPosition",
+    }
+
+    def __init__(
+        self,
+        name,
+        numCameras,
+        videoNumber=0,
+        defaultSettings=None,
+        i2cbus=11,
+        initialCamera="a",
+        controlPins=[4, 17, 18],
+        cameraNamesDict=None,
+        streamPath="cam",
+        streamUrl=None,
+        width=1920,
+        height=1080,
+        fps=30,
+        bitrate=5000000,
+        hflip=False,
+        vflip=False,
+        cameraSwitchMode="restart",
+        keyframeInterval=10,
+        switchSettleTime=0.05,
+        forceKeyframeOnSwitch=True,
+        h264Profile="constrained baseline",
+        publisherStopTimeout=0.05,
+        keepCameraManagerAlive=True,
+        stopEncoderBeforeCamera=True,
+        fastFfmpegInput=True,
+        persistentPublisher=True,
+        persistentEncoder=False,
+        persistentAllocator=False,
+    ):
+        super().__init__(name)
+        self.videoNumber = videoNumber
+        self.numCameras = numCameras
+        self.defaultSettings = defaultSettings or {}
+        self.i2cbus = i2cbus
+        self.cameraNames = cameraNamesDict or {}
+        self.initialCamera = initialCamera
+        self.streamPath = streamPath
+        self.streamUrl = streamUrl or f"rtsp://127.0.0.1:8554/{streamPath}"
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.bitrate = bitrate
+        self.hflip = hflip
+        self.vflip = vflip
+        self.cameraSwitchMode = str(cameraSwitchMode).strip().lower()
+        self.keyframeInterval = int(keyframeInterval)
+        self.switchSettleTime = float(switchSettleTime)
+        self.forceKeyframeOnSwitch = self._coerce_bool(forceKeyframeOnSwitch)
+        self.h264Profile = str(h264Profile)
+        self.publisherStopTimeout = float(publisherStopTimeout)
+        self.keepCameraManagerAlive = self._coerce_bool(keepCameraManagerAlive)
+        self.stopEncoderBeforeCamera = self._coerce_bool(stopEncoderBeforeCamera)
+        self.fastFfmpegInput = self._coerce_bool(fastFfmpegInput)
+        self.persistentPublisher = self._coerce_bool(persistentPublisher)
+        self.persistentEncoder = (
+            self._coerce_bool(persistentEncoder) and self.persistentPublisher
+        )
+        self.persistentAllocator = self._coerce_bool(persistentAllocator)
+        self.selection, self.enable1, self.enable2 = controlPins
+        self.channels = controlPins
+        gpio.setup(self.channels, gpio.OUT)
+        from remla.systemHelpers import get_camera_logger
+
+        self.logger = get_camera_logger()
+
+        self.cameraDict = {
+            "a": (gpio.LOW, gpio.LOW, gpio.HIGH),
+            "b": (gpio.HIGH, gpio.LOW, gpio.HIGH),
+            "c": (gpio.LOW, gpio.HIGH, gpio.LOW),
+            "d": (gpio.HIGH, gpio.HIGH, gpio.LOW),
+            "off": (gpio.LOW, gpio.HIGH, gpio.HIGH),
+        }
+        self.slot_order = ["a", "b", "c", "d"]
+        self.active_slot = None
+        self.picam2 = None
+        self.encoder = None
+        self.output = None
+        self._last_release_stop_ms = 0.0
+        self._last_encoder_stop_ms = 0.0
+        self._last_camera_stop_ms = 0.0
+        self._last_release_close_ms = 0.0
+        self._closing = False
+
+        self._runtime = None
+        self._camera_manager_keepalive_key = None
+        runtime = self._ensure_runtime()
+        self._camera_allocator = (
+            runtime["CameraPersistentAllocator"]() if self.persistentAllocator else None
+        )
+        try:
+            self._start_camera_manager_keepalive()
+            self._start_camera(self._resolve_camera_param(initialCamera), apply_defaults=True)
+        except Exception:
+            self.close()
+            raise
+        atexit.register(self.close)
+        self.state["camera"] = self.active_slot
+
+    def _ensure_runtime(self):
+        if self._runtime is not None:
+            return self._runtime
+        if shutil.which("ffmpeg") is None:
+            raise RuntimeError("ffmpeg is required to publish Picamera2 output to MediaMTX")
+
+        try:
+            from libcamera import Transform
+            from picamera2 import Picamera2
+            from picamera2.allocators import PersistentAllocator
+            from picamera2.encoders import H264Encoder
+            from picamera2.outputs import FfmpegOutput
+            from picamera2.outputs.output import Output
+        except Exception as exc:
+            raise RuntimeError(
+                "PiCamera2MultiCam requires Picamera2/libcamera packages on the Raspberry Pi runtime"
+            ) from exc
+
+        class TrackedRequest:
+            def __init__(self, request, owner):
+                self.request = request
+                self.owner = owner
+
+            def release(self):
+                try:
+                    self.request.release()
+                finally:
+                    self.owner.mark_released()
+
+        class TrackedRequestQueue(queue.Queue):
+            def __init__(self):
+                super().__init__()
+                self.pending = 0
+                self.pending_lock = threading.Lock()
+                self.all_released = threading.Event()
+                self.all_released.set()
+
+            def put(self, item, block=True, timeout=None):
+                with self.pending_lock:
+                    self.pending += 1
+                    self.all_released.clear()
+                super().put(item, block, timeout)
+
+            def get(self, block=True, timeout=None):
+                return TrackedRequest(super().get(block, timeout), self)
+
+            def mark_released(self):
+                with self.pending_lock:
+                    self.pending -= 1
+                    if self.pending == 0:
+                        self.all_released.set()
+
+        class TrackedH264Encoder(H264Encoder):
+            def _start(self):
+                super()._start()
+                self.buf_frame = TrackedRequestQueue()
+                output = self.output
+                self.output_frame_base = getattr(output, "frame_counter", 0)
+
+        class CameraPersistentAllocator(PersistentAllocator):
+            def allocate(self, libcamera_config, use_case):
+                cached = self.buffer_dict.get(use_case)
+                if cached is not None:
+                    cached_buffers = list(cached[2].values())
+                    compatible = len(cached_buffers) == len(libcamera_config) and all(
+                        len(buffers) == stream_config.buffer_count
+                        and all(
+                            buffer.planes[0].length >= stream_config.frame_size
+                            for buffer in buffers
+                        )
+                        for stream_config, buffers in zip(libcamera_config, cached_buffers)
+                    )
+                    if not compatible:
+                        self.deallocate(use_case)
+                        cached = None
+
+                super().allocate(libcamera_config, use_case)
+                if cached is not None:
+                    rebound_buffers = {
+                        stream_config.stream: buffers
+                        for stream_config, buffers in zip(
+                            libcamera_config,
+                            list(self.frame_buffers.values()),
+                        )
+                    }
+                    self.frame_buffers = rebound_buffers
+                    self.buffer_dict[use_case] = (
+                        self.open_fds,
+                        self.libcamera_fds,
+                        self.frame_buffers,
+                        self.mapped_buffers,
+                        self.mapped_buffers_used,
+                    )
+
+        class CameraFfmpegOutput(FfmpegOutput):
+            def __init__(self, output_filename, input_fps=30, fast_input=True, persistent=True):
+                super().__init__(output_filename)
+                self.input_fps = input_fps
+                self.fast_input = fast_input
+                self.persistent = persistent
+                self.last_restart_attempt = 0.0
+                self.generation_frame = threading.Event()
+                self.frame_counter = 0
+
+            def start(self):
+                self.generation_frame.clear()
+                if self.ffmpeg is not None and self.ffmpeg.poll() is None:
+                    Output.start(self)
+                    return
+                if not self.fast_input:
+                    FfmpegOutput.start(self)
+                    return
+
+                import signal as signal_module
+
+                import prctl
+
+                command = [
+                    "ffmpeg",
+                    "-loglevel",
+                    "warning",
+                    "-y",
+                    "-f",
+                    "h264",
+                    "-framerate",
+                    str(self.input_fps),
+                    "-probesize",
+                    "64",
+                    "-analyzeduration",
+                    "0",
+                    "-use_wallclock_as_timestamps",
+                    "1",
+                    "-thread_queue_size",
+                    "8",
+                    "-i",
+                    "-",
+                    "-c:v",
+                    "copy",
+                ] + shlex.split(self.output_filename)
+                self.ffmpeg = subprocess.Popen(
+                    command,
+                    stdin=subprocess.PIPE,
+                    preexec_fn=lambda: prctl.set_pdeathsig(signal_module.SIGKILL),
+                )
+                Output.start(self)
+
+            def stop(self):
+                if self.persistent:
+                    self.generation_frame.clear()
+                    Output.stop(self)
+                else:
+                    self.close_publisher()
+
+            def begin_generation(self):
+                self.generation_frame.clear()
+
+            def close_publisher(self):
+                Output.stop(self)
+                process = self.ffmpeg
+                self.ffmpeg = None
+                if process is None:
+                    return
+                try:
+                    process.stdin.close()
+                except Exception:
+                    pass
+                try:
+                    process.wait(timeout=self.timeout)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=1)
+
+            def outputframe(self, frame, keyframe=True, timestamp=None, packet=None, audio=False):
+                self.frame_counter += 1
+                super().outputframe(frame, keyframe, timestamp, packet, audio)
+                if self.recording and self.ffmpeg is not None and keyframe:
+                    self.generation_frame.set()
+                now = time.monotonic()
+                if self.recording and self.ffmpeg is None and now - self.last_restart_attempt >= 1:
+                    self.last_restart_attempt = now
+                    self.fast_input = False
+                    try:
+                        FfmpegOutput.start(self)
+                    except Exception as exc:
+                        if self.error_callback:
+                            self.error_callback(exc)
+
+        self._runtime = {
+            "Picamera2": Picamera2,
+            "PersistentAllocator": PersistentAllocator,
+            "CameraPersistentAllocator": CameraPersistentAllocator,
+            "H264Encoder": H264Encoder,
+            "TrackedH264Encoder": TrackedH264Encoder,
+            "FfmpegOutput": FfmpegOutput,
+            "CameraFfmpegOutput": CameraFfmpegOutput,
+            "Transform": Transform,
+        }
+        return self._runtime
+
+    def _start_camera_manager_keepalive(self):
+        if not self.keepCameraManagerAlive:
+            return
+        manager = getattr(self._ensure_runtime()["Picamera2"], "_cm", None)
+        if manager is None or not hasattr(manager, "add") or not hasattr(manager, "cleanup"):
+            self.logger.warning("Picamera2 CameraManager keepalive is unavailable")
+            return
+        self._camera_manager_keepalive_key = f"remla-{id(self)}"
+        manager.add(self._camera_manager_keepalive_key, self)
+        self.logger.info("Keeping Picamera2 CameraManager active between camera restarts")
+
+    def _stop_camera_manager_keepalive(self):
+        if self._camera_manager_keepalive_key is None:
+            return
+        manager = getattr(self._ensure_runtime()["Picamera2"], "_cm", None)
+        try:
+            manager.cleanup(self._camera_manager_keepalive_key)
+        except Exception:
+            self.logger.debug("Picamera2 CameraManager keepalive cleanup skipped", exc_info=True)
+        self._camera_manager_keepalive_key = None
+
+    def _coerce_bool(self, value):
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _coerce_control_value(self, control_name, value):
+        if control_name in {"AwbEnable", "AeEnable"}:
+            return self._coerce_bool(value)
+        if control_name == "ColourGains":
+            if isinstance(value, (list, tuple)) and len(value) == 2:
+                return (float(value[0]), float(value[1]))
+            pieces = [part.strip() for part in str(value).split(",")]
+            if len(pieces) != 2:
+                raise ValueError("ColourGains expects two comma-separated values")
+            return (float(pieces[0]), float(pieces[1]))
+        try:
+            if "." in str(value):
+                return float(value)
+            return int(value)
+        except ValueError:
+            return value
+
+    def _normalize_control_name(self, control_name):
+        key = str(control_name).strip()
+        normalized = self.CONTROL_MAPPINGS.get(key.lower())
+        if normalized is not None:
+            return normalized
+        if key and key[0].isupper():
+            return key
+        raise ValueError(
+            "Unsupported camera control '{0}' for {1}. Supported aliases: {2}".format(
+                control_name,
+                self.__class__.__name__,
+                ", ".join(sorted(self.CONTROL_MAPPINGS)),
+            )
+        )
+
+    def _resolve_camera_param(self, param):
+        lowered = str(param).lower()
+        if lowered in self.slot_order:
+            return lowered
+        if lowered == "off":
+            return "off"
+        if lowered in self.cameraNames:
+            return self.cameraNames[lowered]
+        raise ValueError(f"Unknown camera selection '{param}'")
+
+    def _select_slot(self, slot):
+        if slot == "off":
+            gpio.output(self.channels, self.cameraDict["off"])
+            self.active_slot = "off"
+            return
+
+        try:
+            index = self.slot_order.index(slot)
+        except ValueError as exc:
+            raise ValueError(f"Unknown camera slot '{slot}'") from exc
+
+        from remla.systemHelpers import select_arducam_channel_index
+
+        ok = select_arducam_channel_index(
+            index,
+            bus=self.i2cbus,
+            control_pins=list(self.channels),
+            settle_time=self.switchSettleTime,
+        )
+        if not ok:
+            raise RuntimeError(f"Failed to select ArduCam channel '{slot}'")
+        self.active_slot = slot
+
+    def _build_video_config(self):
+        runtime = self._ensure_runtime()
+        controls = {"FrameRate": self.fps}
+        return self.picam2.create_video_configuration(
+            main={"size": (self.width, self.height)},
+            controls=controls,
+            transform=runtime["Transform"](hflip=self.hflip, vflip=self.vflip),
+        )
+
+    def _release_camera(self):
+        if self.picam2 is None:
+            if self._closing and self.encoder is not None and getattr(self.encoder, "_running", False):
+                try:
+                    self.encoder.stop()
+                except Exception:
+                    self.logger.warning("Persistent H264 encoder shutdown failed", exc_info=True)
+                    raise
+                self.encoder = None
+            self._last_release_stop_ms = 0.0
+            self._last_encoder_stop_ms = 0.0
+            self._last_camera_stop_ms = 0.0
+            self._last_release_close_ms = 0.0
+            return
+        started_at = time.monotonic()
+        keep_encoder = (
+            self.persistentEncoder
+            and not self._closing
+            and self.encoder is not None
+            and getattr(self.encoder, "_running", False)
+        )
+        if keep_encoder:
+            try:
+                with self.picam2.lock:
+                    self.picam2.encoders.discard(self.encoder)
+            except Exception:
+                self.logger.warning(
+                    "Could not detach persistent H264 encoder; using full encoder restart",
+                    exc_info=True,
+                )
+                keep_encoder = False
+
+        if keep_encoder and not self._drain_persistent_encoder():
+            with self.picam2.lock:
+                self.picam2.encoders.add(self.encoder)
+            raise RuntimeError("Persistent H264 encoder did not drain before camera switch")
+
+        if keep_encoder:
+            if hasattr(self.output, "begin_generation"):
+                self.output.begin_generation()
+            encoder_stopped_at = started_at
+            try:
+                self.picam2.stop()
+            except Exception:
+                self.logger.debug("Picamera2 stop skipped", exc_info=True)
+            stopped_at = time.monotonic()
+            self._last_encoder_stop_ms = 0.0
+            self._last_camera_stop_ms = (stopped_at - encoder_stopped_at) * 1000
+        elif self.stopEncoderBeforeCamera:
+            try:
+                self.picam2.stop_encoder()
+            except Exception:
+                self.logger.warning("Picamera2 stop_encoder failed", exc_info=True)
+                raise
+            encoder_stopped_at = time.monotonic()
+            try:
+                self.picam2.stop()
+            except Exception:
+                self.logger.debug("Picamera2 stop skipped", exc_info=True)
+            stopped_at = time.monotonic()
+            self._last_encoder_stop_ms = (encoder_stopped_at - started_at) * 1000
+            self._last_camera_stop_ms = (stopped_at - encoder_stopped_at) * 1000
+        else:
+            try:
+                self.picam2.stop_recording()
+            except Exception:
+                self.logger.debug("Picamera2 stop_recording skipped", exc_info=True)
+            stopped_at = time.monotonic()
+            self._last_encoder_stop_ms = 0.0
+            self._last_camera_stop_ms = 0.0
+        try:
+            self.picam2.close()
+        except Exception:
+            self.logger.debug("Picamera2 close skipped", exc_info=True)
+        closed_at = time.monotonic()
+        self._last_release_stop_ms = (stopped_at - started_at) * 1000
+        self._last_release_close_ms = (closed_at - stopped_at) * 1000
+        self.picam2 = None
+        if not keep_encoder:
+            self.encoder = None
+        if not self.persistentPublisher:
+            self.output = None
+
+    def _drain_persistent_encoder(self, timeout=0.3):
+        frame_queue = getattr(self.encoder, "buf_frame", None)
+        all_released = getattr(frame_queue, "all_released", None)
+        if all_released is None:
+            return False
+        deadline = time.monotonic() + timeout
+        target_frame_count = (
+            getattr(self.encoder, "output_frame_base", 0)
+            + getattr(self.encoder, "frames_encoded", 0)
+        )
+        while time.monotonic() < deadline:
+            if (
+                all_released.is_set()
+                and getattr(self.output, "frame_counter", 0) >= target_frame_count
+            ):
+                return True
+            time.sleep(0.002)
+        return False
+
+    def _encoder_matches_camera(self):
+        config = self.picam2.camera_configuration().get("main", {})
+        return (
+            tuple(getattr(self.encoder, "size", ())) == tuple(config.get("size", ()))
+            and getattr(self.encoder, "format", None) == config.get("format")
+            and getattr(self.encoder, "stride", None) == config.get("stride")
+        )
+
+    def _build_stream_output(self):
+        runtime = self._ensure_runtime()
+        if self.encoder is None:
+            encoder_cls = (
+                runtime["TrackedH264Encoder"]
+                if self.persistentEncoder
+                else runtime["H264Encoder"]
+            )
+            encoder_args = {"bitrate": self.bitrate}
+            try:
+                encoder_params = inspect.signature(encoder_cls).parameters
+                if "repeat" in encoder_params:
+                    encoder_args["repeat"] = True
+                if "iperiod" in encoder_params:
+                    encoder_args["iperiod"] = self.keyframeInterval
+                if "profile" in encoder_params:
+                    encoder_args["profile"] = self.h264Profile
+            except (TypeError, ValueError):
+                pass
+            self.encoder = encoder_cls(**encoder_args)
+        if self.output is None:
+            output_args = (
+                f"-f rtsp -rtsp_transport tcp -flush_packets 1 "
+                f"-muxdelay 0 -muxpreload 0 {self.streamUrl}"
+            )
+            self.output = runtime["CameraFfmpegOutput"](
+                output_args,
+                input_fps=self.fps,
+                fast_input=self.fastFfmpegInput,
+                persistent=self.persistentPublisher,
+            )
+            if hasattr(self.output, "timeout"):
+                self.output.timeout = self.publisherStopTimeout
+            self.output.error_callback = lambda exc: self.logger.error(
+                "FFmpeg camera publisher failed: %s", exc
+            )
+
+    def waitForPublisherFrame(self, timeout=3.0):
+        event = getattr(self.output, "generation_frame", None)
+        return event is not None and event.wait(timeout)
+
+    def _request_keyframe(self):
+        if not self.forceKeyframeOnSwitch or self.encoder is None:
+            return False
+        for method_name in ("request_key_frame", "force_key_frame", "force_keyframe"):
+            method = getattr(self.encoder, method_name, None)
+            if method is None:
+                continue
+            try:
+                method()
+                self.logger.info("Requested H264 keyframe with %s", method_name)
+                return True
+            except Exception:
+                self.logger.debug("H264 keyframe request via %s failed", method_name, exc_info=True)
+        try:
+            import fcntl
+            from videodev2 import (
+                V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME,
+                VIDIOC_S_CTRL,
+                v4l2_control,
+            )
+
+            video_device = getattr(self.encoder, "vd", None)
+            if video_device is None:
+                return False
+            control = v4l2_control()
+            control.id = V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME
+            control.value = 1
+            fcntl.ioctl(video_device, VIDIOC_S_CTRL, control)
+            self.logger.info("Requested H264 keyframe through V4L2")
+            return True
+        except Exception:
+            self.logger.debug("H264 keyframe request through V4L2 failed", exc_info=True)
+            return False
+
+    def _switch_camera_hot(self, slot, apply_defaults=False):
+        if slot == "off":
+            self._start_camera(slot, apply_defaults=apply_defaults)
+            return
+        if self.picam2 is None or self.active_slot in {None, "off"}:
+            self._start_camera(slot, apply_defaults=apply_defaults)
+            return
+        if slot == self.active_slot:
+            if apply_defaults and self.defaultSettings:
+                self._apply_controls(self.defaultSettings)
+            self._request_keyframe()
+            self.state["camera"] = self.active_slot
+            return
+
+        previous_slot = self.active_slot
+        self.logger.info("Hot-switching camera mux from %s to %s", previous_slot, slot)
+        try:
+            self._select_slot(slot)
+            if apply_defaults and self.defaultSettings:
+                self._apply_controls(self.defaultSettings)
+            self._request_keyframe()
+        except Exception:
+            self.logger.warning(
+                "Hot camera switch from %s to %s failed; restoring previous slot",
+                previous_slot,
+                slot,
+                exc_info=True,
+            )
+            try:
+                self._select_slot(previous_slot)
+                self._request_keyframe()
+            except Exception:
+                self.logger.warning("Failed to restore previous slot %s", previous_slot, exc_info=True)
+            raise
+        self.state["camera"] = self.active_slot
+
+    def _switch_camera_in_place(self, slot, apply_defaults=False):
+        if self.picam2 is None:
+            raise RuntimeError("Camera is not active")
+        if slot == "off":
+            raise RuntimeError("Cannot switch camera in place to 'off'")
+        if self.active_slot in {None, "off"}:
+            raise RuntimeError("Cannot switch camera in place without an active slot")
+        if slot == self.active_slot:
+            if apply_defaults and self.defaultSettings:
+                self._apply_controls(self.defaultSettings)
+            self.state["camera"] = self.active_slot
+            return
+
+        previous_slot = self.active_slot
+        self.logger.info(
+            "Attempting in-place camera switch from %s to %s", previous_slot, slot
+        )
+
+        try:
+            self.picam2.stop_recording()
+            self.encoder = None
+            if not self.persistentPublisher:
+                self.output = None
+        except Exception:
+            self.logger.warning(
+                "Picamera2 stop_recording failed before switching from %s to %s",
+                previous_slot,
+                slot,
+                exc_info=True,
+            )
+            raise
+
+        try:
+            self._select_slot(slot)
+            self._build_stream_output()
+            self.picam2.start_recording(self.encoder, self.output)
+            if apply_defaults and self.defaultSettings:
+                self._apply_controls(self.defaultSettings)
+        except Exception:
+            self.logger.warning(
+                "Paused camera switch from %s to %s failed; attempting to restore previous slot",
+                previous_slot,
+                slot,
+                exc_info=True,
+            )
+            try:
+                self._select_slot(previous_slot)
+                self.encoder = None
+                if not self.persistentPublisher:
+                    self.output = None
+                self._build_stream_output()
+                self.picam2.start_recording(self.encoder, self.output)
+                self.state["camera"] = self.active_slot
+            except Exception:
+                self.logger.warning(
+                    "Failed to restore previous slot %s after paused switch failure",
+                    previous_slot,
+                    exc_info=True,
+                )
+            raise
+
+        self.state["camera"] = self.active_slot
+
+    def _start_camera(self, slot, apply_defaults=False):
+        runtime = self._ensure_runtime()
+        started_at = time.monotonic()
+        self._release_camera()
+        released_at = time.monotonic()
+
+        if slot == "off":
+            self._select_slot("off")
+            self.state["camera"] = self.active_slot
+            return
+
+        self._select_slot(slot)
+        selected_at = time.monotonic()
+
+        picam_cls = runtime["Picamera2"]
+        if self._camera_allocator is not None:
+            self.picam2 = picam_cls(self.videoNumber, allocator=self._camera_allocator)
+        else:
+            self.picam2 = picam_cls(self.videoNumber)
+        opened_at = time.monotonic()
+        self.picam2.configure(self._build_video_config())
+        configured_at = time.monotonic()
+        encoder_is_running = (
+            self.persistentEncoder
+            and self.encoder is not None
+            and getattr(self.encoder, "_running", False)
+        )
+        if encoder_is_running and not self._encoder_matches_camera():
+            self.logger.warning("Camera stream configuration changed; restarting H264 encoder")
+            self.encoder.stop()
+            self.encoder = None
+            encoder_is_running = False
+        self._build_stream_output()
+        if encoder_is_running:
+            self.picam2.encoders = self.encoder
+            if self._request_keyframe():
+                self.picam2.start()
+            else:
+                with self.picam2.lock:
+                    self.picam2.encoders.discard(self.encoder)
+                self.encoder.stop()
+                self.encoder = None
+                self._build_stream_output()
+                self.picam2.start_recording(self.encoder, self.output)
+        else:
+            self.picam2.start_recording(self.encoder, self.output)
+        recording_at = time.monotonic()
+        if apply_defaults and self.defaultSettings:
+            self._apply_controls(self.defaultSettings)
+        controls_at = time.monotonic()
+        self.state["camera"] = self.active_slot
+        self.logger.info(
+            "Camera restart timing slot=%s release=%.1fms recording_stop=%.1fms "
+            "encoder_stop=%.1fms camera_stop=%.1fms camera_close=%.1fms "
+            "select=%.1fms open=%.1fms configure=%.1fms "
+            "pipeline_start=%.1fms controls=%.1fms total=%.1fms",
+            slot,
+            (released_at - started_at) * 1000,
+            self._last_release_stop_ms,
+            self._last_encoder_stop_ms,
+            self._last_camera_stop_ms,
+            self._last_release_close_ms,
+            (selected_at - released_at) * 1000,
+            (opened_at - selected_at) * 1000,
+            (configured_at - opened_at) * 1000,
+            (recording_at - configured_at) * 1000,
+            (controls_at - recording_at) * 1000,
+            (controls_at - started_at) * 1000,
+        )
+
+    def _apply_controls(self, controls):
+        if self.picam2 is None:
+            raise RuntimeError("Camera is not active")
+        translated = {}
+        for control_name, value in controls.items():
+            normalized_name = self._normalize_control_name(control_name)
+            translated[normalized_name] = self._coerce_control_value(normalized_name, value)
+        self.picam2.set_controls(translated)
+        self.state["controls"] = {**self.state.get("controls", {}), **translated}
+
+    def _switch_camera(self, slot, apply_defaults=False):
+        if self.cameraSwitchMode == "hot":
+            self._switch_camera_hot(slot, apply_defaults=apply_defaults)
+        elif self.cameraSwitchMode == "restart":
+            self.logger.info("Restarting Picamera2 while switching to %s", slot)
+            self._start_camera(slot, apply_defaults=apply_defaults)
+        elif self.cameraSwitchMode in {"pause", "in-place", "in_place"}:
+            self._switch_camera_in_place(slot, apply_defaults=apply_defaults)
+        else:
+            raise ValueError(
+                "Unsupported cameraSwitchMode '{0}'. Use hot, restart, or pause.".format(
+                    self.cameraSwitchMode
+                )
+            )
+
+    def camera(self, param):
+        slot = self._resolve_camera_param(param)
+        print("Switching to camera " + slot)
+        self._switch_camera(slot, apply_defaults=True)
+        self.state["camera"] = slot
+
+    def camera_parser(self, params):
+        if len(params) != 1:
+            raise ArgumentNumberError(len(params), 1, "camera")
+        param = params[0].lower()
+        if param not in self.cameraDict:
+            raise ArgumentError(self.name, "camera", param, ["a", "b", "c", "d", "off"])
+        return param
+
+    def cameraName(self, param):
+        key = str(param).lower()
+        if key not in self.cameraNames:
+            raise ArgumentError(self.name, "cameraName", param, self.cameraNames)
+        slot = self.cameraNames[key]
+        print("Switching to camera {0}, slot {1}".format(key, slot))
+        self._switch_camera(slot, apply_defaults=True)
+        self.state["camera"] = slot
+
+    def cameraName_parser(self, params):
+        if len(params) != 1:
+            raise ArgumentNumberError(len(params), 1, "cameraName")
+        param = params[0].lower()
+        if param not in self.cameraNames:
+            raise ArgumentError(self.name, "cameraName", param, self.cameraNames)
+        return param
+
+    def imageMod(self, params):
+        requested_name = params[0]
+        try:
+            control_name = self._normalize_control_name(requested_name)
+            control_value = self._coerce_control_value(control_name, params[1])
+        except ValueError as exc:
+            raise ValueError(
+                "Camera imageMod failed for control '{0}' with value '{1}': {2}".format(
+                    requested_name, params[1], exc
+                )
+            ) from exc
+
+        try:
+            self._apply_controls({control_name: control_value})
+        except Exception as exc:
+            raise RuntimeError(
+                "Camera imageMod failed while applying control '{0}' "
+                "(requested as '{1}') with value '{2}'".format(
+                    control_name, requested_name, params[1]
+                )
+            ) from exc
+
+    def imageMod_parser(self, params):
+        if len(params) != 2:
+            raise ArgumentNumberError(len(params), 2, "imageMod")
+        return params
+
+    def reset(self):
+        self._start_camera(self._resolve_camera_param(self.initialCamera), apply_defaults=True)
+        self.state["camera"] = self.active_slot
+
+    def close(self):
+        atexit.unregister(self.close)
+        self._closing = True
+        self._release_camera()
+        if self.output is not None and hasattr(self.output, "close_publisher"):
+            self.output.close_publisher()
+        self.output = None
+        self._stop_camera_manager_keepalive()
+        if self._camera_allocator is not None:
+            self._camera_allocator.close()
+            if self._camera_allocator.dmaHeap is not None:
+                self._camera_allocator.dmaHeap.close()
+            self._camera_allocator = None
 
 
 class ElectronicScreen(BaseController):

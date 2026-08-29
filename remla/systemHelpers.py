@@ -30,6 +30,41 @@ ARDUCAM_I2C_ADDR = "0x70"
 ARDUCAM_CHANNEL_BYTES = [0x04, 0x05, 0x06, 0x07]  # index 0->a,1->b,2->c,3->d
 
 
+def resolve_i2c_bus(bus):
+    if isinstance(bus, int):
+        return bus
+
+    bus_value = str(bus).strip()
+    if bus_value.isdigit():
+        return int(bus_value)
+
+    try:
+        result = subprocess.run(
+            ["i2cdetect", "-l"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("Could not list I2C adapters with i2cdetect -l") from exc
+
+    matches = []
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if not parts or not parts[0].startswith("i2c-"):
+            continue
+        adapter_name = line.lower()
+        if bus_value.lower() in adapter_name:
+            matches.append(int(parts[0].split("-", 1)[1]))
+
+    if not matches:
+        raise RuntimeError(f"Could not find an I2C adapter matching '{bus_value}'")
+    if len(matches) > 1:
+        raise RuntimeError(f"Multiple I2C adapters match '{bus_value}': {matches}")
+    return matches[0]
+
+
 def get_camera_logger() -> logging.Logger:
     """Return a configured logger that writes to `logsDirectory / 'camera_cycle.log'`.
     Creates the logs directory if needed and ensures the handler isn't duplicated.
@@ -117,11 +152,10 @@ def moveAndOverwrite(source:Path, dest:Path):
     shutil.move(source, dest)
 
 def getSettings():
-    dir = Path(typer.get_app_dir(APP_NAME))
-    # with open(dir, "r") as file:
+    # with open(settingsDirectory, "r") as file:
     #     settingsString = file.read()
 
-    return yaml.load(dir/"settings.yml")
+    return yaml.load(settingsDirectory / "settings.yml")
 
 def clearDirectory(directory: Path) -> None:
     if directory.exists() and directory.is_dir():
@@ -262,8 +296,11 @@ WantedBy=multi-user.target
 
 def cleanupPID():
     typer.echo("Cleaning up...")
-    if os.path.exists(pidFilePath):
-        os.remove(pidFilePath)
+    try:
+        if int(pidFilePath.read_text().strip()) == os.getpid():
+            pidFilePath.unlink()
+    except (FileNotFoundError, ValueError):
+        pass
     sys.exit(0)
 
 def getCallingUserID():
@@ -282,7 +319,12 @@ def bothOrNoneAssigned(x, y):
     else:
         return False
 
-def select_arducam_channel_index(index: int, bus: int = 1, control_pins: list | None = None) -> bool:
+def select_arducam_channel_index(
+    index: int,
+    bus: int = 1,
+    control_pins: list | None = None,
+    settle_time: float = 0.1,
+) -> bool:
     """
     Select channel by zero-based index (0=a,1=b,2=c,3=d) using the same i2c bytes
     used by ArduCamMultiCamera.camerai2c.
@@ -341,18 +383,26 @@ def select_arducam_channel_index(index: int, bus: int = 1, control_pins: list | 
         except Exception:
             logger.exception("RPi.GPIO fallback failed")
 
+    try:
+        resolved_bus = resolve_i2c_bus(bus)
+    except RuntimeError as exc:
+        logger.error("Could not resolve I2C bus %s: %s", bus, exc)
+        return False
+
     # Perform I2C mux switch via i2cset (explicit external tool as requested)
     try:
         subprocess.run([
             "i2cset",
+            "-f",
             "-y",
-            str(bus),
+            str(resolved_bus),
             ARDUCAM_I2C_ADDR,
             "0x00",
             f"0x{val:02x}",
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(0.1)
-        logger.info("Selected ArduCam channel %s (i2c 0x%02x) wrote_gpio=%s", index, val, wrote_gpio)
+        if settle_time > 0:
+            time.sleep(settle_time)
+        logger.info("Selected ArduCam channel %s on bus %s (i2c 0x%02x) wrote_gpio=%s", index, resolved_bus, val, wrote_gpio)
         return True
     except FileNotFoundError:
         logger.error("i2cset not found; install i2c-tools")
@@ -415,11 +465,11 @@ def cycle_initialize_cameras(timeout_per_camera: int = 4) -> None:
     device_settings = lab_settings.get("devices", {})
     camera_cfg = None
     for device in device_settings.values():
-        if device.get("type") == "ArduCamMultiCamera":
+        if device.get("type") in {"ArduCamMultiCamera", "PiCamera2MultiCam"}:
             camera_cfg = device
             break
     if camera_cfg is None:
-        logger.info("No ArduCamMultiCamera device configured in lab settings; skipping camera cycling.")
+        logger.info("No supported multi-camera device configured in lab settings; skipping camera cycling.")
         return
 
     numCameras = camera_cfg.get("numCameras", 0)
@@ -477,4 +527,3 @@ def get_boot_status() -> bool:
         runMarker.write_text(str(current_boot))
         logger.error("Boot record file missing; assuming reboot.")
         return True
-

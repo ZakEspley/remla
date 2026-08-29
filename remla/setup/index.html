@@ -97,6 +97,27 @@
 
             ws.onmessage = function(event) {
                 document.getElementById('responseInput').value = event.data;
+                const prefix = 'COMMAND: ';
+                if (event.data.startsWith(prefix)) {
+                    const [command, switchId, state, pipelineMs, onlineMs] = event.data.slice(prefix.length).split('/');
+                    const eventNames = {
+                        cameraSwitchStarted: 'remla:camera-switch-started',
+                        cameraSwitchReady: 'remla:camera-switch-ready',
+                        cameraSwitchFailed: 'remla:camera-switch-failed',
+                    };
+                    if (eventNames[command]) {
+                        window.dispatchEvent(new CustomEvent(eventNames[command], {
+                            detail: {
+                                switchId,
+                                state,
+                                pipelineMs: Number(pipelineMs),
+                                onlineMs: Number(onlineMs),
+                                readyMs: Number(onlineMs),
+                                receivedAt: performance.now(),
+                            },
+                        }));
+                    }
+                }
                 console.log('Message from server ', event.data);
             };
 

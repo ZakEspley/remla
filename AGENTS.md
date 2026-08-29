@@ -26,8 +26,8 @@
 - Keep formatting consistent with existing files (see style section).
 
 ## Tests
-- There is a single ad-hoc test script at `tests/test.py`.
-- Run all tests: `poetry run python tests/test.py`
+- There is an ad-hoc boot-time test script and standard-library unit tests.
+- Run all tests: `poetry run python tests/test.py && poetry run python -m unittest tests/test_mediamtx.py tests/test_mediamtx_camera.py tests/test_device_config.py`
 - Run a single test: `poetry run python tests/test.py` (no pytest suite configured).
 - If you add a real test framework, update this section with exact commands.
 

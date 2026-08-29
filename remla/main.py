@@ -6,6 +6,8 @@ import shutil
 import signal
 import socket
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -20,6 +22,7 @@ from typing_extensions import Annotated
 from remla import i2ccmd, setupcmd
 from remla.labcontrol.Controllers import *
 from remla.labcontrol.Experiment import Experiment
+from remla.mediamtx import MediaMTXInstallError, install_latest
 from remla.settings import *
 from remla.systemHelpers import *
 from remla.typerHelpers import *
@@ -27,7 +30,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.2"
+__version__ = "0.3.3.dev28"
 
 
 def version_callback(value: bool):
@@ -36,9 +39,13 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_show_locals=False)
+camera_app = typer.Typer(no_args_is_help=True)
+mediamtx_app = typer.Typer(no_args_is_help=True)
 app.add_typer(setupcmd.app, name="setup")
 app.add_typer(i2ccmd.app, name="i2c")
+app.add_typer(camera_app, name="camera")
+app.add_typer(mediamtx_app, name="mediamtx")
 
 
 @app.callback()
@@ -57,8 +64,172 @@ def version(
 
 @app.command()
 def showconfig():
-    app_dir = typer.get_app_dir(APP_NAME)
-    typer.echo(app_dir)
+    typer.echo(settingsDirectory)
+
+
+def _install_remla_overlays() -> None:
+    for overlay_path in remlaOverlayPaths:
+        if not overlay_path.exists():
+            alert(
+                f"Missing packaged overlay: {overlay_path}\n"
+                "Build the REMLA camera mux overlays from the Raspberry Pi kernel overlay source "
+                "and place them in remla/overlays before installing alternate-bus camera mux support."
+            )
+            raise typer.Abort()
+
+    if not bootOverlayDirectory.exists():
+        alert(f"Could not find Raspberry Pi overlay directory at {bootOverlayDirectory}")
+        raise typer.Abort()
+
+    for overlay_path in remlaOverlayPaths:
+        target = bootOverlayDirectory / overlay_path.name
+        shutil.copy2(overlay_path, target)
+        success(f"Installed {target}")
+
+
+@app.command(
+    "install-overlays",
+    help="Install REMLA Device Tree overlays into /boot/firmware/overlays.",
+)
+def install_overlays():
+    if os.geteuid() != 0:
+        alert("This command must be run as root.")
+        typer.echo("Try running:")
+        typer.echo("sudo remla install-overlays")
+        raise typer.Abort()
+
+    _install_remla_overlays()
+
+
+@camera_app.command("init", help="Initialize the configured multi-camera mux by setting its GPIO and I2C channel.")
+def camera_init(
+    slot: Annotated[
+        Optional[str],
+        typer.Option(
+            "--slot",
+            "-s",
+            help="Camera slot or camera name to select. Defaults to the configured initialCamera.",
+        ),
+    ] = None,
+):
+    if os.geteuid() != 0:
+        alert("This command must be run as root.")
+        typer.echo("Try running:")
+        typer.echo("sudo remla camera init")
+        raise typer.Abort()
+
+    remla_settings_path = settingsDirectory / "settings.yml"
+    if not remla_settings_path.exists():
+        alert(f"Could not find settings file at {remla_settings_path}")
+        raise typer.Abort()
+
+    remla_settings = yaml.load(remla_settings_path)
+    current_lab = remla_settings.get("currentLab")
+    if not current_lab:
+        alert("No current lab is configured in settings.yml")
+        raise typer.Abort()
+
+    current_lab_settings_path = remoteLabsDirectory / current_lab
+    if not current_lab_settings_path.exists():
+        alert(f"Lab settings file does not exist at {current_lab_settings_path}")
+        raise typer.Abort()
+
+    lab_settings = yaml.load(current_lab_settings_path)
+    devices = lab_settings.get("devices", {})
+
+    camera_name = None
+    camera_details = None
+    for name, details in devices.items():
+        if details.get("type") in {"PiCamera2MultiCam", "ArduCamMultiCamera"}:
+            camera_name = name
+            camera_details = details
+            break
+
+    if camera_details is None:
+        alert("No multi-camera device is configured for the current lab.")
+        raise typer.Abort()
+
+    configured_i2cbus = camera_details.get("i2cbus", 11)
+    try:
+        i2cbus = resolve_i2c_bus(configured_i2cbus)
+    except RuntimeError as exc:
+        alert(str(exc))
+        raise typer.Abort()
+    control_pins = camera_details.get("controlPins", [4, 17, 18])
+    camera_names = camera_details.get("cameraNamesDict") or {}
+    initial_camera = str(camera_details.get("initialCamera", "a")).lower()
+    slot_order = ["a", "b", "c", "d"]
+
+    requested = str(slot or initial_camera).lower()
+    if requested in camera_names:
+        resolved_slot = str(camera_names[requested]).lower()
+    else:
+        resolved_slot = requested
+
+    if resolved_slot not in slot_order:
+        alert(
+            f"Invalid camera selection '{requested}'. Use one of {slot_order} or a configured camera name."
+        )
+        raise typer.Abort()
+
+    ok = select_arducam_channel_index(
+        slot_order.index(resolved_slot),
+        bus=i2cbus,
+        control_pins=list(control_pins),
+    )
+    if not ok:
+        alert(
+            f"Failed to initialize camera mux for device '{camera_name}' on slot '{resolved_slot}'."
+        )
+        raise typer.Abort()
+
+    success(
+        f"Initialized multi-camera mux for '{camera_name}' to slot '{resolved_slot}' "
+        f"(requested '{requested}') on I2C bus {i2cbus}."
+    )
+
+    video_nodes = sorted(Path("/dev").glob("video*"))
+    if video_nodes:
+        typer.echo("Detected V4L2 video device nodes:")
+        for node in video_nodes:
+            typer.echo(f"  - {node}")
+    else:
+        warning(
+            "No /dev/video* nodes are present. On Raspberry Pi OS Bookworm this can still be normal "
+            "when using the libcamera/Picamera2 stack."
+        )
+
+    probe_commands = [
+        ["rpicam-hello", "--list-cameras"],
+        ["libcamera-hello", "--list-cameras"],
+    ]
+    for probe_cmd in probe_commands:
+        if shutil.which(probe_cmd[0]) is None:
+            continue
+        typer.echo(f"Probing camera stack with: {' '.join(probe_cmd)}")
+        result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        output = (result.stdout or "").strip()
+        errors = (result.stderr or "").strip()
+        if output:
+            typer.echo(output)
+        if errors:
+            typer.echo(errors)
+        if result.returncode == 0:
+            success(
+                "The libcamera stack can see at least one camera. "
+                "If you still expected /dev/video0, that is a separate V4L2 compatibility issue."
+            )
+        else:
+            warning(
+                "The camera mux was selected, but the Raspberry Pi camera stack still did not detect a camera. "
+                "This usually means the active mux channel, sensor overlay, or hardware path still needs attention."
+            )
+        break
+    else:
+        warning(
+            "Neither rpicam-hello nor libcamera-hello is installed, so remla could not verify camera detection "
+            "after selecting the mux channel."
+        )
 
 
 @app.command(
@@ -145,56 +316,150 @@ def init():
     # run(wstest=True)
 
 
-def _mediamtx():
-    remlaPanel("Installing MediaMTX")
-    typer.echo("  Checking for prior installation")
-    mediamtxInstalled = False
-    if os.path.exists("/usr/local/bin/mediamtx"):
-        typer.echo("  Already found Mediamtx Installation")
-        mediamtxInstalled = True
-    else:
-        echoResult(
-            download_and_extract_tar(mediaMTX_tar_file, settingsDirectory, "mediamtx"),
-            "Downloaded and extracted MediaMTX",
-            "Something went wrong in the downloading and extracting process. Check internet and try again.",
-        )
-    typer.echo("  Creating MediaMTX Systemlinks to fix LibCameraBug")
-    typer.echo("  Creating MediaMTX settings file")
-    # Change log file location in mediamtx.yml settings file.
-    # Then save the new mediamtx.yml file to /usr/local/etc where mediamtx says to locate
-    # the file.
-    mediamtxSettings = yaml.load(setupDirectory / "mediamtx.yml")
-    mediamtxSettings["logFile"] = str(logsDirectory / "mediamtx.log")
-    encryptionValue = mediamtxSettings["encryption"]
-    rtmpEncryptionValue = mediamtxSettings["rtmpEncryption"]
-    mediamtxSettings["encryption"] = "<replace1>"
-    mediamtxSettings["rtmpEncryption"] = "<replace2>"
-    mediamtxSettingsLocation = Path("/usr/local/etc")
-    (mediamtxSettingsLocation / "mediamtx.yml").unlink(missing_ok=True)
-
+def _write_mediamtx_settings():
+    mediamtx_settings = yaml.load(setupDirectory / "mediamtx.yml")
+    mediamtx_settings["logFile"] = str(logsDirectory / "mediamtx.log")
     mediamtxSettingsLocation.mkdir(parents=True, exist_ok=True)
-    yaml.dump(mediamtxSettings, mediamtxSettingsLocation / "mediamtx.yml")
-    with open(mediamtxSettingsLocation / "mediamtx.yml", "r") as file:
-        content = file.read()
-    content = content.replace("<replace1>", f'"{encryptionValue}"')
-    content = content.replace("<replace2>", f'"{rtmpEncryptionValue}"')
-    with open(mediamtxSettingsLocation / "mediamtx.yml", "w") as file:
-        file.write(content)
+    target = mediamtxSettingsLocation / "mediamtx.yml"
+    if target.exists():
+        shutil.copy2(target, target.with_suffix(".yml.previous"))
 
-    # Now move mediamtx binary to /usr/local/bin where mediamtx says to move it
-    if not mediamtxInstalled:
-        moveAndOverwrite(
-            settingsDirectory / "mediamtx/mediamtx", mediamtxBinaryLocation
-        )
-    # Move service file to systemd so that we can run it on boot.
-    shutil.copy(setupDirectory / "mediamtx.service", "/etc/systemd/system")
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        dir=mediamtxSettingsLocation,
+        prefix="mediamtx-",
+        suffix=".yml",
+        delete=False,
+    ) as temporary_file:
+        temporary_path = Path(temporary_file.name)
+        yaml.dump(mediamtx_settings, temporary_file)
+    os.replace(temporary_path, target)
 
-    # Finally setup systemd to run this service on start.
-    subprocess.run(["sudo", "systemctl", "daemon-reload"])
-    subprocess.run(["sudo", "systemctl", "enable", "mediamtx"])
-    subprocess.run(["sudo", "systemctl", "start", "mediamtx"])
-    subprocess.run(["sudo", "systemctl", "restart", "mediamtx"])
-    success("Successfully set up mediamtx")
+
+def _restore_file(target: Path, backup: Path, existed: bool):
+    if existed:
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent,
+            prefix=f".{target.name}-restore-",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+        try:
+            shutil.copy2(backup, temporary_path)
+            os.replace(temporary_path, target)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+    else:
+        target.unlink(missing_ok=True)
+
+
+def _restore_mediamtx_installation(
+    backup_directory: Path,
+    had_binary: bool,
+    had_settings: bool,
+    had_service: bool,
+    service_was_active: bool,
+    service_was_enabled: bool,
+    remla_was_active: bool,
+):
+    binary = mediamtxBinaryLocation / "mediamtx"
+    settings = mediamtxSettingsLocation / "mediamtx.yml"
+    service = Path("/etc/systemd/system/mediamtx.service")
+    if not had_service:
+        subprocess.run(["systemctl", "disable", "--now", "mediamtx"], check=False)
+    _restore_file(binary, backup_directory / "mediamtx", had_binary)
+    _restore_file(settings, backup_directory / "mediamtx.yml", had_settings)
+    _restore_file(service, backup_directory / "mediamtx.service", had_service)
+
+    subprocess.run(["systemctl", "daemon-reload"], check=True)
+    if service_was_enabled:
+        subprocess.run(["systemctl", "enable", "mediamtx"], check=True)
+    elif had_service:
+        subprocess.run(["systemctl", "disable", "mediamtx"], check=True)
+    if service_was_active:
+        subprocess.run(["systemctl", "restart", "mediamtx"], check=True)
+    elif had_service:
+        subprocess.run(["systemctl", "stop", "mediamtx"], check=True)
+    if remla_was_active:
+        subprocess.run(["systemctl", "restart", "remla.service"], check=True)
+
+
+def _mediamtx():
+    remlaPanel("Installing the latest MediaMTX release")
+    binary = mediamtxBinaryLocation / "mediamtx"
+    settings = mediamtxSettingsLocation / "mediamtx.yml"
+    service = Path("/etc/systemd/system/mediamtx.service")
+    had_binary = binary.exists()
+    had_settings = settings.exists()
+    had_service = service.exists()
+    service_was_active = (
+        subprocess.run(["systemctl", "is-active", "--quiet", "mediamtx"]).returncode == 0
+    )
+    service_was_enabled = (
+        subprocess.run(["systemctl", "is-enabled", "--quiet", "mediamtx"]).returncode == 0
+    )
+    remla_was_active = (
+        subprocess.run(["systemctl", "is-active", "--quiet", "remla.service"]).returncode
+        == 0
+    )
+
+    with tempfile.TemporaryDirectory(prefix="remla-mediamtx-backup-") as backup_name:
+        backup_directory = Path(backup_name)
+        if had_binary:
+            shutil.copy2(binary, backup_directory / "mediamtx")
+        if had_settings:
+            shutil.copy2(settings, backup_directory / "mediamtx.yml")
+        if had_service:
+            shutil.copy2(service, backup_directory / "mediamtx.service")
+
+        try:
+            release = install_latest(mediamtxBinaryLocation)
+            success(f"Installed MediaMTX {release.version}")
+            typer.echo("Writing REMLA MediaMTX settings")
+            _write_mediamtx_settings()
+            shutil.copy(setupDirectory / "mediamtx.service", service)
+            subprocess.run(["systemctl", "daemon-reload"], check=True)
+            subprocess.run(["systemctl", "enable", "mediamtx"], check=True)
+            subprocess.run(["systemctl", "restart", "mediamtx"], check=True)
+            time.sleep(1)
+            subprocess.run(["systemctl", "is-active", "--quiet", "mediamtx"], check=True)
+            if remla_was_active:
+                subprocess.run(["systemctl", "restart", "remla.service"], check=True)
+        except (MediaMTXInstallError, OSError, subprocess.CalledProcessError) as exc:
+            try:
+                _restore_mediamtx_installation(
+                    backup_directory,
+                    had_binary,
+                    had_settings,
+                    had_service,
+                    service_was_active,
+                    service_was_enabled,
+                    remla_was_active,
+                )
+            except (OSError, subprocess.CalledProcessError) as rollback_exc:
+                alert(f"MediaMTX update failed and rollback also failed: {exc}; {rollback_exc}")
+            else:
+                alert(f"MediaMTX update failed and the previous installation was restored: {exc}")
+            raise typer.Abort() from exc
+
+    success(f"MediaMTX {release.version} is installed and running")
+    if remla_was_active:
+        success("Restarted the REMLA service")
+    return release
+
+
+@mediamtx_app.command(
+    "update", help="Install the latest MediaMTX release and REMLA configuration."
+)
+def mediamtx_update():
+    if os.geteuid() != 0:
+        alert("This command must be run as root.")
+        typer.echo("Try running:")
+        typer.echo("sudo remla mediamtx update")
+        raise typer.Abort()
+
+    logsDirectory.mkdir(parents=True, exist_ok=True)
+    _mediamtx()
 
 
 def _nginx():
@@ -285,6 +550,20 @@ def interactivesetup():
 
     remlaPanel("Now updating /boot/firmware/config.txt")
     arducamMultiplexers = {2: "camera-mux-2port", 3: "camera-mux-4port"}
+    use_alternate_mux_bus = False
+    alternate_mux_bus = None
+    if multiplexer == 3:
+        use_alternate_mux_bus = typer.confirm(
+            "Do you want the 4-port camera mux to use an alternate I2C bus?",
+            default=False,
+        )
+        if use_alternate_mux_bus:
+            alternate_mux_bus = IntPrompt.ask(
+                "Which I2C bus should the camera mux use?",
+                choices=[str(i) for i in range(0, 12)],
+                default=3,
+            )
+
     dtOverlayString = "dtoverlay="
 
     if multiplexer == 1:
@@ -292,7 +571,19 @@ def interactivesetup():
     else:
         cams = ["cam" + str(i) + "-" + sensor for i in cameraPorts]
         arducamString = ",".join(cams)
-        dtOverlayString += f"{arducamMultiplexers[multiplexer]},{arducamString}"
+        overlay_name = arducamMultiplexers[multiplexer]
+        if use_alternate_mux_bus:
+            overlay_name = remlaCameraMux4PortOverlayName
+        dtOverlayString += f"{overlay_name},{arducamString}"
+        if alternate_mux_bus is not None:
+            dtOverlayString += f",i2c{alternate_mux_bus}"
+
+    if use_alternate_mux_bus:
+        _install_remla_overlays()
+        warning(
+            "Make sure the selected I2C bus is also configured, for example with "
+            f"dtoverlay=i2c-gpio,bus={alternate_mux_bus},i2c_gpio_sda=23,i2c_gpio_scl=24"
+        )
 
     if customSensor:
         warning("Issue with custom sensor!")
@@ -320,7 +611,11 @@ def interactivesetup():
 
         # Prepare the regex pattern
         # Combine allowed sensors and arducam multiplexer values into one list for the regex pattern
-        combinedOptions = allowedSensors + list(arducamMultiplexers.values())
+        combinedOptions = (
+            allowedSensors
+            + list(arducamMultiplexers.values())
+            + [remlaCameraMux4PortOverlayName]
+        )
         pattern = re.compile(
             r"dtoverlay=("
             + "|".join(re.escape(option) for option in combinedOptions)
@@ -499,11 +794,15 @@ def run(
     print(f"########{now.center(64)}########")
     print("#" * 80)
     print()
-    if status():
+    include_service = "INVOCATION_ID" not in os.environ
+    if _is_remla_running(include_service=include_service):
         warning(
             "Remla is already running. If you want to restart run `remla restart` or stop before running with new options."
         )
         raise typer.Abort()
+    if foreground or wstest:
+        pidFilePath.parent.mkdir(parents=True, exist_ok=True)
+        pidFilePath.write_text(str(os.getpid()))
     signal.signal(signal.SIGTERM, lambda signum, frame: cleanupPID())
     signal.signal(signal.SIGINT, lambda signum, frame: cleanupPID())
     # perform initial camera cycling once per boot (if configured)
@@ -611,36 +910,58 @@ def stop():
             "Stopping remla. This could take some time for the system to reset to its starting parameters. Please be patient."
         )
         subprocess.run(["systemctl", "stop", "remla.service"], check=True)
+        pid = _read_remla_pid()
+        if pid is not None and _pid_is_remla(pid):
+            os.kill(pid, signal.SIGTERM)
+        pidFilePath.unlink(missing_ok=True)
         success("Stopped running remla")
-    except subprocess.CalledProcessError:
-        alert("Failed to stop remla")
+    except (OSError, subprocess.CalledProcessError) as exc:
+        alert(f"Failed to stop remla: {exc}")
+
+
+def _read_remla_pid() -> Optional[int]:
+    try:
+        return int(pidFilePath.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def _pid_is_remla(pid: int) -> bool:
+    try:
+        command = (Path("/proc") / str(pid) / "cmdline").read_bytes().replace(b"\0", b" ")
+    except (FileNotFoundError, PermissionError, ProcessLookupError):
+        return False
+    return b"remla" in command and (b" run" in command or b" start" in command)
+
+
+def _remla_service_is_active() -> bool:
+    return (
+        subprocess.run(
+            ["systemctl", "is-active", "--quiet", "remla.service"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+
+
+def _is_remla_running(include_service: bool = True) -> bool:
+    pid = _read_remla_pid()
+    if pid is not None:
+        if _pid_is_remla(pid):
+            return True
+        pidFilePath.unlink(missing_ok=True)
+    return include_service and _remla_service_is_active()
 
 
 @app.command()
 def status():
-    # pidFilePathFull = pidFilePath.replace("<uid>", str(getCallingUserID()))
-    print(pidFilePath)
-    if os.path.exists(pidFilePath):
-        # Read exisitng pid file
-        with open(pidFilePath, "r") as file:
-            try:
-                pid = int(file.read().strip())
-                os.kill(pid, 0)
-                typer.echo("Remla is already running")
-                return True
-            except ValueError:
-                typer.echo("PID File is corrupt. Starting a new instance.")
-            except ProcessLookupError:
-                typer.echo("Remla instance not found. Staring new isntance")
-            except PermissionError:
-                typer.echo("Permission denied when checking PID. Assuming its running.")
-                return True
+    running = _is_remla_running()
+    if running:
+        typer.echo("Remla is running")
     else:
-        typer.echo("No PID file found. Starting new instance of remla")
-
-    with open(pidFilePath, "w+") as file:
-        file.write(str(os.getpid()))
-    return False
+        typer.echo("Remla is not running")
+    return running
 
 
 @app.command()
