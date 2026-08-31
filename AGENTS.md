@@ -27,9 +27,9 @@
 - Keep formatting consistent with existing files (see style section).
 
 ## Tests
-- There is an ad-hoc boot-time test script and standard-library unit tests.
-- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config`
-- `tests/test.py` is an ad-hoc boot-time script that requires an existing root `boottime` file; it is not a clean-checkout test until Phase 1 replaces it.
+- Tests use the standard-library `unittest` runner.
+- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config`
+- `tests.test_boot_status` covers the camera-cycle boot marker using temporary files and a mocked boot timestamp.
 - Run one unit test: `poetry run python -m unittest tests.test_runtime_imports` (no pytest suite configured).
 - If you add a real test framework, update this section with exact commands.
 
@@ -114,7 +114,7 @@
 - YAML utilities: `remla/yaml.py`
 - Controllers: `remla/labcontrol/Controllers.py`
 - Experiment server: `remla/labcontrol/Experiment.py`
-- Test script: `tests/test.py`
+- Boot-marker tests: `tests/test_boot_status.py`
 
 ## Common tasks
 - Show config path: `poetry run remla showconfig`

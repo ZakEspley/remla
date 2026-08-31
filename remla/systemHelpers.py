@@ -24,7 +24,6 @@ import re
 from contextlib import contextmanager
 from typing import Callable
 from remla.customvalidators import *
-from remla.yaml import yaml
 
 ARDUCAM_I2C_ADDR = "0x70"
 ARDUCAM_CHANNEL_BYTES = [0x04, 0x05, 0x06, 0x07]  # index 0->a,1->b,2->c,3->d
@@ -152,6 +151,8 @@ def moveAndOverwrite(source:Path, dest:Path):
     shutil.move(source, dest)
 
 def getSettings():
+    from remla.yaml import yaml
+
     # with open(settingsDirectory, "r") as file:
     #     settingsString = file.read()
 
@@ -426,6 +427,8 @@ def cycle_initialize_cameras(timeout_per_camera: int = 4) -> None:
     - create runMarker immediately to avoid re-entry when systemctl starts the same binary
     - if remla.service is already active, skip cycling (avoid disrupting a live service)
     """
+    from remla.yaml import yaml
+
     logger = get_camera_logger()
 
     # # If remla.service is active, avoid cycling to not disrupt a running instance
