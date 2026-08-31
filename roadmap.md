@@ -76,7 +76,7 @@
 - [ ] Add hardware-free fakes for controllers, executor-facing blocking operations, WebSocket clients, MediaMTX checks, IPC, and signals.
 - [ ] Add focused standard-library tests before each behavior change; no GPIO, pigpio, camera, VISA, systemd, or network access is allowed in this suite.
 - [x] Move pigpio, GPIO, and VISA resource acquisition out of `Controllers.py` import scope. `main.run()` initializes them explicitly before foreground device construction, and `tests.test_runtime_imports` covers non-Pi imports and fake resource creation.
-- [ ] Replace the root `boottime` smoke script with a clean-checkout, hardware-free test; it currently fails when the marker is absent.
+- [x] Replace the root `boottime` smoke script with `tests.test_boot_status`, which verifies the camera-cycle boot marker using temporary files and a mocked boot timestamp.
 - [x] Make `main.run()` explicitly initialize `Experiment` runtime resources. `Experiment.__init__` creates no executor, event loop, IPC socket, thread, logging file, or signal handler; initialization is idempotent, serializes competing calls, and rolls back failed IPC startup.
 - [ ] Make `main.run()` own final shutdown; `Experiment` must release its executor, IPC listener, and event loop through one coordinator teardown path.
 
