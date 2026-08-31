@@ -75,22 +75,52 @@ class Experiment(object):
 
         self.initializedStates = False
         self.admin = admin
-        self.executor = ThreadPoolExecutor(max_workers=4)
+        self.executor = None
+        self.loop = None
+        self.ipc_socket = None
+        self.ipc_thread = None
+        self._runtime_initialization_lock = threading.Lock()
+        self._runtime_state = "new"
         self.logPath = logsDirectory / f"{self.name}.log"
-        # self.jsonFile = os.path.join(self.directory, self.name + ".json")
-        logging.basicConfig(
-            filename=self.logPath,
-            level=logging.INFO,
-            format="%(levelname)s - %(asctime)s - %(filename)s - %(funcName)s \r\n %(message)s \r\n",
-        )
-        logging.info("""
-        ##############################################################
-        ####                Starting New Log                      ####
-        ##############################################################    
-        """)
-        self.startIpcListener()
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
+
+    def initialize_runtime(self):
+        with self._runtime_initialization_lock:
+            if self._runtime_state == "ready":
+                return
+
+            self._runtime_state = "initializing"
+            executor = None
+            loop = None
+            try:
+                executor = ThreadPoolExecutor(max_workers=4)
+                loop = asyncio.new_event_loop()
+                logging.basicConfig(
+                    filename=self.logPath,
+                    level=logging.INFO,
+                    format="%(levelname)s - %(asctime)s - %(filename)s - %(funcName)s \r\n %(message)s \r\n",
+                )
+                logging.info("""
+                ##############################################################
+                ####                Starting New Log                      ####
+                ##############################################################
+                """)
+                ipc_socket, ipc_thread = self.startIpcListener(loop=loop)
+                self.executor = executor
+                self.loop = loop
+                self.ipc_socket = ipc_socket
+                self.ipc_thread = ipc_thread
+                self._runtime_state = "ready"
+            except Exception:
+                self.executor = None
+                self.loop = None
+                self.ipc_socket = None
+                self.ipc_thread = None
+                self._runtime_state = "new"
+                if executor is not None:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                if loop is not None:
+                    loop.close()
+                raise
 
     def logException(self, task):
         if task.exception():
@@ -262,12 +292,16 @@ class Experiment(object):
     def startServer(self):
         # This function sets up and runs the WebSocket server indefinitely
         # loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
+        with self._runtime_initialization_lock:
+            if self._runtime_state != "ready":
+                raise RuntimeError("Experiment runtime is not initialized")
+            loop = self.loop
+        asyncio.set_event_loop(loop)
         start_server = websockets.serve(self.handleConnection, self.host, self.port)
 
         print(f"Server started at ws://{self.host}:{self.port}")
-        self.loop.run_until_complete(start_server)
-        self.loop.run_forever()
+        loop.run_until_complete(start_server)
+        loop.run_forever()
 
     async def sendDataToClient(self, websocket, dataStr: str):
         try:
@@ -390,14 +424,25 @@ class Experiment(object):
             logging.error("Socket Error!", exc_info=True)
             print(f"Socket error: {err}")
 
-    def startIpcListener(self, ipc_path="/tmp/remla_cmd.sock"):
-        # Remove old socket if exists
+    def startIpcListener(self, ipc_path="/tmp/remla_cmd.sock", loop=None):
+        if loop is None:
+            loop = self.loop
+        if loop is None:
+            raise RuntimeError("Experiment runtime is not initialized")
         if os.path.exists(ipc_path):
-            os.unlink(ipc_path)
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                probe.connect(ipc_path)
+            except (ConnectionRefusedError, FileNotFoundError):
+                os.unlink(ipc_path)
+            except OSError as error:
+                raise RuntimeError(f"Unable to inspect IPC listener at {ipc_path}") from error
+            else:
+                raise RuntimeError(f"IPC listener is already running at {ipc_path}")
+            finally:
+                probe.close()
         ipc_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        ipc_sock.bind(ipc_path)
-        ipc_sock.listen(1)
-        print(f"IPC listener started at {ipc_path}")
+        bound = False
 
         def ipc_loop():
             while True:
@@ -408,7 +453,7 @@ class Experiment(object):
                     if self.activeClient:
                         future = asyncio.run_coroutine_threadsafe(
                             self.sendAlert(self.activeClient, f"Experiment/message/{data}"),
-                            self.loop
+                            loop
                         )
                         print(f"Sent {data} message to active client.")
                     else:
@@ -416,7 +461,19 @@ class Experiment(object):
                 conn.close()
 
 
-        threading.Thread(target=ipc_loop, daemon=True).start()
+        try:
+            ipc_sock.bind(ipc_path)
+            bound = True
+            ipc_sock.listen(1)
+            print(f"IPC listener started at {ipc_path}")
+            ipc_thread = threading.Thread(target=ipc_loop, daemon=True)
+            ipc_thread.start()
+        except Exception:
+            if bound and os.path.exists(ipc_path):
+                os.unlink(ipc_path)
+            ipc_sock.close()
+            raise
+        return ipc_sock, ipc_thread
 
     def resetExperiment(self):
         logging.info("Resetting experiment to original state.")

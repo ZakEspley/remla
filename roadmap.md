@@ -77,7 +77,8 @@
 - [ ] Add focused standard-library tests before each behavior change; no GPIO, pigpio, camera, VISA, systemd, or network access is allowed in this suite.
 - [x] Move pigpio, GPIO, and VISA resource acquisition out of `Controllers.py` import scope. `main.run()` initializes them explicitly before foreground device construction, and `tests.test_runtime_imports` covers non-Pi imports and fake resource creation.
 - [ ] Replace the root `boottime` smoke script with a clean-checkout, hardware-free test; it currently fails when the marker is absent.
-- [ ] Make `main.run()` own runtime construction and final shutdown; `Experiment` must not create global loops, sockets, threads, or signal handlers in its constructor.
+- [x] Make `main.run()` explicitly initialize `Experiment` runtime resources. `Experiment.__init__` creates no executor, event loop, IPC socket, thread, logging file, or signal handler; initialization is idempotent, serializes competing calls, and rolls back failed IPC startup.
+- [ ] Make `main.run()` own final shutdown; `Experiment` must release its executor, IPC listener, and event loop through one coordinator teardown path.
 
 **Exit criteria:** importing runtime modules on a non-Pi host succeeds; a fake runtime can start and stop without files, threads, sockets, tasks, or executor workers left behind.
 
