@@ -28,7 +28,7 @@
 
 ## Tests
 - There is an ad-hoc boot-time test script and standard-library unit tests.
-- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config`
+- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config`
 - `tests/test.py` is an ad-hoc boot-time script that requires an existing root `boottime` file; it is not a clean-checkout test until Phase 1 replaces it.
 - Run one unit test: `poetry run python -m unittest tests.test_runtime_imports` (no pytest suite configured).
 - If you add a real test framework, update this section with exact commands.
@@ -90,6 +90,7 @@
 ## Devices and controllers
 - Controllers subclass `BaseController` and expose command methods.
 - `remla.labcontrol.hardware.initialize_hardware_resources()` creates pigpio, GPIO, and VISA resources during foreground runtime setup; imports must remain hardware-free.
+- Constructing `Experiment` is side-effect free; call `initialize_runtime()` before adding lock groups or starting the server.
 - Command parsing uses `<cmd>_parser` methods; keep them in sync.
 - `deviceType` should be set for each controller.
 - Respect lock groups in Experiment when adding new device types.

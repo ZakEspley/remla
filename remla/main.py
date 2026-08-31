@@ -30,7 +30,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.5"
+__version__ = "0.3.6.dev1"
 
 
 def version_callback(value: bool):
@@ -871,6 +871,8 @@ def run(
             experiment = Experiment("RemoteLabs", admin=True)
         else:
             experiment = Experiment("RemoteLabs")
+
+        experiment.initialize_runtime()
 
         for device in devices.values():
             experiment.addDevice(device)
