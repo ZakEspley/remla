@@ -30,7 +30,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.4"
+__version__ = "0.3.5.dev1"
 
 
 def version_callback(value: bool):
@@ -863,6 +863,7 @@ def run(
             raise typer.Abort()
 
         # Initialize devices from the lab settings
+        initialize_hardware_resources()
         devices = createDevicesFromYml(labSettings["devices"])
         print("Using devices:", labSettings["devices"])
         # Create and setup the experiment

@@ -12,9 +12,9 @@ from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import urlopen
 
-import RPi.GPIO as gpio
 import websockets
 
+from remla.labcontrol.hardware import gpio
 from remla.settings import *
 
 
