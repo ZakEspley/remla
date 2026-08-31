@@ -75,7 +75,8 @@
 ### 1. Establish regression harness and lifecycle seams
 - [ ] Add hardware-free fakes for controllers, executor-facing blocking operations, WebSocket clients, MediaMTX checks, IPC, and signals.
 - [ ] Add focused standard-library tests before each behavior change; no GPIO, pigpio, camera, VISA, systemd, or network access is allowed in this suite.
-- [ ] Move hardware resource acquisition out of `Controllers.py` import scope and inject/create resources only during runtime construction.
+- [x] Move pigpio, GPIO, and VISA resource acquisition out of `Controllers.py` import scope. `main.run()` initializes them explicitly before foreground device construction, and `tests.test_runtime_imports` covers non-Pi imports and fake resource creation.
+- [ ] Replace the root `boottime` smoke script with a clean-checkout, hardware-free test; it currently fails when the marker is absent.
 - [ ] Make `main.run()` own runtime construction and final shutdown; `Experiment` must not create global loops, sockets, threads, or signal handlers in its constructor.
 
 **Exit criteria:** importing runtime modules on a non-Pi host succeeds; a fake runtime can start and stop without files, threads, sockets, tasks, or executor workers left behind.

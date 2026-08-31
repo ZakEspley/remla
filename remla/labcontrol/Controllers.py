@@ -9,25 +9,33 @@ import threading
 import time
 import shutil
 from abc import ABC, ABCMeta, abstractmethod
+from types import SimpleNamespace
 from warnings import warn
 
 import dlipower
-import pigpio
-import pyvisa as visa
-import RPi.GPIO as gpio
-import RPistepper as stp
 import tplink_smarthome as tp
 import typer
 from adafruit_motor import stepper
 from adafruit_motorkit import MotorKit
 
+try:
+    import RPistepper as stp
+except RuntimeError:
+    class UnavailableStepperMotor:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("RPistepper is only available on Raspberry Pi hardware")
+
+    stp = SimpleNamespace(Motor=UnavailableStepperMotor)
+
+from remla.labcontrol.hardware import (
+    gpio,
+    initialize_hardware_resources,
+    pi,
+    pigpio,
+    visaManager,
+)
 from remla.mediamtx_camera import patch_camera_control
 from remla.systemHelpers import resolve_i2c_bus
-
-pi = pigpio.pi()
-gpio.setmode(gpio.BCM)
-visaManager = visa.ResourceManager("@py")
-
 
 class InitialAttributeTracker:
     def __init__(self, name=None):

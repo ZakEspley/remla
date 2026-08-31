@@ -8,6 +8,7 @@
 - Python 3.11 CLI app for controlling remote lab hardware (Raspberry Pi).
 - Entry point: Typer app in remla/main.py.
 - Hardware controllers live in remla/labcontrol/Controllers.py.
+- Runtime hardware resources are created in remla/labcontrol/hardware.py.
 - WebSocket server logic lives in remla/labcontrol/Experiment.py.
 - Paths and system locations are centralized in remla/settings.py.
 
@@ -27,8 +28,9 @@
 
 ## Tests
 - There is an ad-hoc boot-time test script and standard-library unit tests.
-- Run all tests: `poetry run python tests/test.py && poetry run python -m unittest tests/test_mediamtx.py tests/test_mediamtx_camera.py tests/test_device_config.py`
-- Run a single test: `poetry run python tests/test.py` (no pytest suite configured).
+- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config`
+- `tests/test.py` is an ad-hoc boot-time script that requires an existing root `boottime` file; it is not a clean-checkout test until Phase 1 replaces it.
+- Run one unit test: `poetry run python -m unittest tests.test_runtime_imports` (no pytest suite configured).
 - If you add a real test framework, update this section with exact commands.
 
 ## Runtime and system notes
@@ -87,6 +89,7 @@
 
 ## Devices and controllers
 - Controllers subclass `BaseController` and expose command methods.
+- `remla.labcontrol.hardware.initialize_hardware_resources()` creates pigpio, GPIO, and VISA resources during foreground runtime setup; imports must remain hardware-free.
 - Command parsing uses `<cmd>_parser` methods; keep them in sync.
 - `deviceType` should be set for each controller.
 - Respect lock groups in Experiment when adding new device types.
