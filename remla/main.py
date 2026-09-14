@@ -31,7 +31,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.8"
+__version__ = "0.3.9.dev1"
 
 
 def version_callback(value: bool):
