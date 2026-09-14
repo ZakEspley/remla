@@ -11,6 +11,7 @@
 - Runtime hardware resources are created in remla/labcontrol/hardware.py.
 - Versioned persisted-state storage lives in remla/runtime_state.py.
 - FIFO control ownership and operation lifecycle models live in remla/runtime_operations.py.
+- Named lock-group scheduling lives in remla/command_scheduler.py.
 - Persisted state is diagnostic only at startup; a lab name/hash mismatch is preserved and requires explicit operator archive/discard or configuration restoration.
 - WebSocket server logic lives in remla/labcontrol/Experiment.py.
 - Paths and system locations are centralized in remla/settings.py.
@@ -31,7 +32,7 @@
 
 ## Tests
 - Tests use the standard-library `unittest` runner.
-- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_runtime_state tests.test_runtime_operations tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config`
+- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config`
 - `tests.test_boot_status` covers the camera-cycle boot marker using temporary files and a mocked boot timestamp.
 - Run one unit test: `poetry run python -m unittest tests.test_runtime_imports` (no pytest suite configured).
 - If you add a real test framework, update this section with exact commands.
@@ -120,6 +121,7 @@
 - Boot-marker tests: `tests/test_boot_status.py`
 - Runtime-state tests: `tests/test_runtime_state.py`
 - Operation-model tests: `tests/test_runtime_operations.py`
+- Scheduler tests: `tests/test_command_scheduler.py`
 
 ## Common tasks
 - Show config path: `poetry run remla showconfig`
