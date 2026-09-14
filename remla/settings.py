@@ -50,3 +50,4 @@ websiteCSSDirectory = websiteStaticDirectory / "css"
 websiteImgsDirectory = websiteStaticDirectory / "imgs"
 
 runMarker = settingsDirectory / "remla_camera_cycled" 
+runtimeStatePath = settingsDirectory / "runtime-state.json"

@@ -16,6 +16,7 @@ import websockets
 
 from remla.labcontrol.hardware import gpio
 from remla.settings import *
+from remla.runtime_state import RuntimeStateStore, StateWriteError
 
 
 class NoDeviceError(Exception):
@@ -60,7 +61,15 @@ def waitForMediaMTXOnline(path, previous_source_id, timeout=3.0):
 
 
 class Experiment(object):
-    def __init__(self, name, host="localhost", port=8675, admin=False):
+    def __init__(
+        self,
+        name,
+        host="localhost",
+        port=8675,
+        admin=False,
+        lab_config_identity=None,
+        state_store=None,
+    ):
         self.name = name
         self.host = host
         self.port = port
@@ -70,6 +79,11 @@ class Experiment(object):
         self.lockMapping = {}
 
         self.allStates = {}
+        self.lab_config_identity = lab_config_identity
+        self.state_store = state_store or RuntimeStateStore(runtimeStatePath)
+        self.persisted_state = None
+        self.state_diagnostic = None
+        self.state_writable = lab_config_identity is not None
         self.clients = deque()
         self.activeClient = None
 
@@ -138,19 +152,44 @@ class Experiment(object):
             self.lockMapping[device.name] = name
 
     def recallState(self):
-        logging.info("Recalling State")
-        with open(self.jsonFile, "r") as f:
-            self.allStates = json.load(f)
-        for name, device in self.devices.items():
-            device.setState(self.allStates[name])
+        return self.load_persisted_state()
+
+    def load_persisted_state(self):
+        if self.lab_config_identity is None:
+            return None
+
+        result = self.state_store.load(self.lab_config_identity)
+        self.persisted_state = result.snapshot
+        self.state_diagnostic = result.diagnostic
+        self.state_writable = result.diagnostic in (None, "missing")
         self.initializedStates = True
+
+        if result.message is not None:
+            logging.warning(result.message)
+        elif result.diagnostic not in (None, "missing"):
+            logging.warning("Unable to load persisted runtime state: %s", result.diagnostic)
+        return result
 
     def getControllerStates(self):
         logging.info("Getting Controller States")
         for name, device in self.devices.items():
             self.allStates[name] = device.getState()
-        with open(self.jsonFile, "w") as f:
-            json.dump(self.allStates, f)
+        if self.lab_config_identity is not None and self.state_writable:
+            device_states = {
+                name: {"observed": state, "desired_safe": None}
+                for name, state in self.allStates.items()
+            }
+            snapshot = self.state_store.new_snapshot(
+                self.lab_config_identity,
+                "ready",
+                device_states,
+            )
+            try:
+                self.state_store.save(snapshot)
+            except StateWriteError as error:
+                self.state_diagnostic = "write_failed"
+                self.state_writable = False
+                logging.warning("Unable to persist runtime state: %s", error)
         self.initializedStates = True
 
     async def handleConnection(self, websocket, path):

@@ -23,6 +23,7 @@ from remla import i2ccmd, setupcmd
 from remla.labcontrol.Controllers import *
 from remla.labcontrol.Experiment import Experiment
 from remla.mediamtx import MediaMTXInstallError, install_latest
+from remla.runtime_state import LabConfigIdentity
 from remla.settings import *
 from remla.systemHelpers import *
 from remla.typerHelpers import *
@@ -30,7 +31,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.7"
+__version__ = "0.3.8.dev1"
 
 
 def version_callback(value: bool):
@@ -855,12 +856,17 @@ def run(
             )
             raise typer.Abort()
 
-        labSettings = yaml.load(currentLabSettingsPath)
+        lab_config_content = currentLabSettingsPath.read_bytes()
+        labSettings = yaml.load(lab_config_content.decode("utf-8"))
         if "devices" not in labSettings:
             alert(
                 f"Device list not found in the lab settings file located at {currentLabSettingsPath}. Please update the file to include your list of devices."
             )
             raise typer.Abort()
+
+        lab_config_identity = LabConfigIdentity.from_content(
+            str(remlaSettings["currentLab"]), lab_config_content
+        )
 
         # Initialize devices from the lab settings
         initialize_hardware_resources()
@@ -868,14 +874,26 @@ def run(
         print("Using devices:", labSettings["devices"])
         # Create and setup the experiment
         if admin:
-            experiment = Experiment("RemoteLabs", admin=True)
+            experiment = Experiment(
+                "RemoteLabs",
+                admin=True,
+                lab_config_identity=lab_config_identity,
+            )
         else:
-            experiment = Experiment("RemoteLabs")
+            experiment = Experiment(
+                "RemoteLabs",
+                lab_config_identity=lab_config_identity,
+            )
 
         experiment.initialize_runtime()
+        state_result = experiment.load_persisted_state()
+        if state_result is not None and state_result.message is not None:
+            warning(state_result.message)
 
         for device in devices.values():
             experiment.addDevice(device)
+
+        experiment.getControllerStates()
 
         #### Now set up the locks.
         locksConfig = labSettings.get("locks", {})
