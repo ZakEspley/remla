@@ -92,6 +92,7 @@
 **Tests:** clean start; valid round trip; corrupt file; schema mismatch; changed lab configuration; command success/failure state transitions; write failure.
 
 ### 3. Implement the user queue, tracked lock-group operations, and reset barrier
+- [x] Add hardware-free FIFO ownership and operation lifecycle models. They track handoff-pending/resetting ownership, operation IDs, optional lock groups, outstanding limits, and terminal outcomes without changing command execution yet.
 - [ ] Replace `handleConnection()` task creation, its `finally` reset, and `onClientDisconnect()` with one FIFO ownership manager. Preserve the existing per-lock-group command concurrency.
 - [ ] Register/unregister every active-user operation and its lock group; make client promotion, waiting-user status, operation cancellation, reset start/completion, and owner loss observable state transitions.
 - [ ] Convert the existing lock mapping into startup validation. Fail before serving if any command-capable device lacks explicit scheduling metadata, including an intentional no-lock-group declaration.
