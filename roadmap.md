@@ -83,7 +83,8 @@
 **Exit criteria:** importing runtime modules on a non-Pi host succeeds; a fake runtime can start and stop without files, threads, sockets, tasks, or executor workers left behind.
 
 ### 2. Replace broken state persistence with the target state model
-- [ ] Define the versioned persisted-state location through centralized settings, with a service-account-compatible ownership model.
+- [x] Define `runtimeStatePath` in centralized settings and add the versioned, atomic `RuntimeStateStore`. Snapshots identify the lab by name and configuration hash; mismatch diagnostics explain that state is preserved and requires explicit configuration restoration or archive/discard before it can be replaced.
+- [x] Load persisted state for diagnostics during foreground startup and record an initial observed device snapshot when it is safe to write. No persisted state is replayed to hardware.
 - [ ] Replace `allStates`, `initializedStates`, `recallState()`, and `getControllerStates()` with explicit snapshot/load operations implementing the target schema and atomic writes.
 - [ ] Add state publication to the transport boundary; retain a legacy text adapter until the JSON protocol migration is complete.
 - [ ] Record command and reset failures without overwriting the last known device state.

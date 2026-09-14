@@ -5,7 +5,10 @@ import socket
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 from unittest import mock
+
+from remla.runtime_state import LabConfigIdentity, RuntimeStateStore, StateWriteError
 
 
 experiment_module = importlib.import_module("remla.labcontrol.Experiment")
@@ -269,6 +272,76 @@ class ExperimentLifecycleTests(unittest.TestCase):
             finally:
                 listener.close()
                 os.unlink(socket_path)
+
+    def test_mismatched_persisted_state_is_preserved_with_a_diagnostic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_store = RuntimeStateStore(Path(directory) / "runtime-state.json")
+            stored_identity = LabConfigIdentity.from_content("lab.yml", b"original")
+            active_identity = LabConfigIdentity.from_content("lab.yml", b"changed")
+            state_store.save(state_store.new_snapshot(stored_identity, "ready", {}))
+            experiment = experiment_module.Experiment(
+                "RemoteLabs",
+                lab_config_identity=active_identity,
+                state_store=state_store,
+            )
+
+            result = experiment.load_persisted_state()
+            stored_snapshot = state_store.load(stored_identity).snapshot
+
+        self.assertEqual(result.diagnostic, "lab_mismatch")
+        self.assertFalse(experiment.state_writable)
+        self.assertIn("To resolve", result.message)
+        self.assertIsNotNone(stored_snapshot)
+
+    def test_controller_states_are_persisted_for_the_active_lab(self):
+        class Device:
+            name = "camera"
+
+            def getState(self):
+                return {"enabled": True}
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_store = RuntimeStateStore(Path(directory) / "runtime-state.json")
+            identity = LabConfigIdentity.from_content("lab.yml", b"active")
+            experiment = experiment_module.Experiment(
+                "RemoteLabs",
+                lab_config_identity=identity,
+                state_store=state_store,
+            )
+            experiment.load_persisted_state()
+            experiment.addDevice(Device())
+
+            experiment.getControllerStates()
+
+            snapshot = state_store.load(identity).snapshot
+
+        self.assertEqual(snapshot["devices"]["camera"]["observed"], {"enabled": True})
+
+    def test_state_write_failure_does_not_abort_controller_state_capture(self):
+        class Device:
+            name = "camera"
+
+            def getState(self):
+                return {"enabled": True}
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_store = RuntimeStateStore(Path(directory) / "runtime-state.json")
+            identity = LabConfigIdentity.from_content("lab.yml", b"active")
+            experiment = experiment_module.Experiment(
+                "RemoteLabs",
+                lab_config_identity=identity,
+                state_store=state_store,
+            )
+            experiment.load_persisted_state()
+            experiment.addDevice(Device())
+
+            with mock.patch.object(
+                state_store, "save", side_effect=StateWriteError("disk")
+            ):
+                experiment.getControllerStates()
+
+        self.assertEqual(experiment.state_diagnostic, "write_failed")
+        self.assertFalse(experiment.state_writable)
 
 
 if __name__ == "__main__":
