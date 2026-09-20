@@ -419,27 +419,15 @@ def cycle_initialize_cameras(timeout_per_camera: int = 4) -> None:
     Use the saved camera config (settings.yml -> 'camera') to cycle cameras.
     For each configured camera port:
       - select that mux channel
-      - start remla.service
+      - restart mediamtx
       - wait timeout_per_camera seconds
-      - stop remla.service
 
-    Guarding:
-    - create runMarker immediately to avoid re-entry when systemctl starts the same binary
-    - if remla.service is already active, skip cycling (avoid disrupting a live service)
+    This function does not start, stop, or restart remla.service. The caller is
+    responsible for applying the once-per-boot guard.
     """
     from remla.yaml import yaml
 
     logger = get_camera_logger()
-
-    # # If remla.service is active, avoid cycling to not disrupt a running instance
-    # try:
-    #     remla_active = subprocess.run(["systemctl", "is-active", "--quiet", "remla.service"]).returncode == 0
-    # except Exception:
-    #     remla_active = False
-
-    # if remla_active:
-    #     logger.warning("remla.service is already active; skipping camera cycling to avoid disrupting service.")
-    #     return
 
     # load top-level settings and find current lab
     try:

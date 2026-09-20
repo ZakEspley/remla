@@ -117,7 +117,7 @@
 **Tests:** JSON schema/contract fixtures; legacy adapter fixtures; malformed input; client reconnect snapshot; operation/event correlation; browser-client unit coverage where practical.
 
 ### 6. Apply camera-cycle plan and deployment boundaries
-- [ ] Complete `UPDATE_PLAN.md`: remove cycling from `init()`, keep the boot guard only in `run()`, and update stale comments/documentation.
+- [x] Complete `UPDATE_PLAN.md`: cycling is removed from `init()`, the boot guard remains only in `run()`, and camera-cycle documentation reflects MediaMTX-only restarts.
 - [ ] Verify that cycle/reset/shutdown ordering does not restart or interrupt MediaMTX unexpectedly.
 - [ ] Define runtime service permissions so normal users operate the website without `sudo`; retain privileged actions only in installation/provisioning.
 - [ ] After runtime behavior is covered, migrate packaging from Poetry to PEP 621 + UV and define the installer/service layout separately from application code.

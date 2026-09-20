@@ -304,13 +304,6 @@ def init():
 
     interactivesetup()
     typer.echo("Wrapping up install...")
-    # perform initial camera cycling once per boot (if configured)
-    try:
-        if not runMarker.exists():
-            rprint("Performing initial camera cycle (first-time this boot)...")
-            cycle_initialize_cameras(timeout_per_camera=4)
-    except Exception as e:
-        warning(f"Initial camera cycling failed or skipped: {e}")
     subprocess.run(["sudo", "systemctl", "daemon-reload"])
     subprocess.run(["sudo", "systemctl", "restart", "remla.service"])
     enable_service("remla")

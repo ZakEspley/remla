@@ -9,6 +9,7 @@
 - Entry point: Typer app in remla/main.py.
 - Hardware controllers live in remla/labcontrol/Controllers.py.
 - Runtime hardware resources are created in remla/labcontrol/hardware.py.
+- Camera cycling runs only from `remla run` once per boot through `get_boot_status()`; `remla init` never cycles cameras.
 - Versioned persisted-state storage lives in remla/runtime_state.py.
 - FIFO control ownership and operation lifecycle models live in remla/runtime_operations.py.
 - Named lock-group scheduling lives in remla/command_scheduler.py. `Experiment.runDeviceMethod()` registers each command and delegates its optional lock-group serialization to this scheduler; devices with no mapping are currently intentionally ungrouped. Timed-out grouped commands retain their scheduler lock until their command coroutine finishes; timeout faults block admission and send a legacy fault event. A pending handoff has a 60-second timer; handoff reset and `Experiment.shutdown()` cancel queued operations, drain scheduler work, and acquire a reset barrier. Every controller must explicitly implement abstract `safe_stop()`: `reset()` may return to baseline, while `safe_stop()` must not initiate baseline movement. Graceful shutdown resets then safe-stops; fault shutdown only safe-stops. Prefer `request_shutdown()` for signal-driven teardown; foreground startup failure uses coordinator teardown, while service-mode teardown and hardware validation remain unfinished.
@@ -33,7 +34,7 @@
 
 ## Tests
 - Tests use the standard-library `unittest` runner.
-- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety`
+- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety`
 - `tests.test_boot_status` covers the camera-cycle boot marker using temporary files and a mocked boot timestamp.
 - Run one unit test: `poetry run python -m unittest tests.test_runtime_imports` (no pytest suite configured).
 - If you add a real test framework, update this section with exact commands.
@@ -119,7 +120,7 @@
 - YAML utilities: `remla/yaml.py`
 - Controllers: `remla/labcontrol/Controllers.py`
 - Experiment server: `remla/labcontrol/Experiment.py`
-- Boot-marker tests: `tests/test_boot_status.py`
+- Boot-marker tests: `tests/test_boot_status.py`; init camera-cycle regression: `tests/test_camera_cycle.py`
 - Runtime-state tests: `tests/test_runtime_state.py`
 - Operation-model tests: `tests/test_runtime_operations.py`
 - Scheduler tests: `tests/test_command_scheduler.py`
