@@ -1,11 +1,55 @@
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
+from pathlib import Path
 from unittest import mock
 
 
 class RuntimeImportTests(unittest.TestCase):
+    def test_foreground_signal_shutdown_cleans_startup_pid(self):
+        from remla import main
+
+        experiment = mock.Mock()
+        experiment.request_shutdown.return_value = None
+        with tempfile.TemporaryDirectory() as directory:
+            pid_path = Path(directory) / "remla.pid"
+            pid_path.touch()
+
+            with self.assertRaises(KeyboardInterrupt):
+                main._request_foreground_shutdown(experiment, pid_path)
+
+            self.assertFalse(pid_path.exists())
+        experiment.request_shutdown.assert_called_once_with("foreground_signal")
+
+    def test_foreground_signal_keeps_pid_until_async_shutdown_finishes(self):
+        from remla import main
+
+        experiment = mock.Mock()
+        experiment.request_shutdown.return_value = mock.Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            pid_path = Path(directory) / "remla.pid"
+            pid_path.touch()
+
+            main._request_foreground_shutdown(experiment, pid_path)
+
+            self.assertTrue(pid_path.exists())
+
+    def test_startup_teardown_requests_shutdown_and_removes_pid(self):
+        from remla import main
+
+        experiment = mock.Mock()
+        experiment._runtime_state = "ready"
+        with tempfile.TemporaryDirectory() as directory:
+            pid_path = Path(directory) / "remla.pid"
+            pid_path.touch()
+
+            main._teardown_foreground_startup(experiment, pid_path)
+
+            self.assertFalse(pid_path.exists())
+        experiment.request_shutdown.assert_called_once_with("startup_failure")
+
     def test_recovery_ipc_client_returns_service_result(self):
         from remla import main
 

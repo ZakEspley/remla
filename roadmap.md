@@ -106,6 +106,8 @@
 - [ ] `safe_stop()` is abstract and explicitly implemented by every controller. Graceful coordinator shutdown resets then safe-stops; fault shutdown safe-stops without reset. Hardware-validate each declared safe state and add controller-specific recovery where a stop does not establish a known state.
 - [ ] Remove direct `exit()`, `os._exit()`, and independent cleanup paths that bypass the coordinator.
 
+Current coverage verifies repeated shutdown requests share one future, foreground signal helper behavior, startup-failure teardown, idempotent cleanup, reset failure, and graceful/fault shutdown mode selection.
+
 **Tests:** Ctrl+C while idle; Ctrl+C during a blocking command; SIGTERM during reset; repeated signals; startup failure after partial device creation; reset exception aggregation; exactly-once PID/socket cleanup; executor shutdown.
 
 ### 5. Migrate control and IPC messages to JSON

@@ -50,6 +50,24 @@ app.add_typer(camera_app, name="camera")
 app.add_typer(mediamtx_app, name="mediamtx")
 
 
+def _request_foreground_shutdown(experiment, pid_path):
+    shutdown_future = experiment.request_shutdown("foreground_signal")
+    if shutdown_future is None:
+        pid_path.unlink(missing_ok=True)
+        raise KeyboardInterrupt()
+    return shutdown_future
+
+
+def _teardown_foreground_startup(experiment, pid_path):
+    try:
+        if experiment._runtime_state != "stopped":
+            experiment.request_shutdown("startup_failure")
+    except Exception as shutdown_error:
+        warning(f"Startup teardown failed: {shutdown_error}")
+    finally:
+        pid_path.unlink(missing_ok=True)
+
+
 @app.callback()
 def version(
     version: bool = typer.Option(
@@ -882,10 +900,7 @@ def run(
         experiment.initialize_runtime()
 
         def request_foreground_shutdown(signum, frame):
-            shutdown_future = experiment.request_shutdown("foreground_signal")
-            if shutdown_future is None:
-                pidFilePath.unlink(missing_ok=True)
-                raise KeyboardInterrupt()
+            _request_foreground_shutdown(experiment, pidFilePath)
 
         signal.signal(
             signal.SIGTERM,
@@ -929,12 +944,7 @@ def run(
             get_boot_status()
             experiment.startServer()
         finally:
-            if experiment._runtime_state != "stopped":
-                try:
-                    experiment.request_shutdown("startup_failure")
-                except Exception as shutdown_error:
-                    warning(f"Startup teardown failed: {shutdown_error}")
-            pidFilePath.unlink(missing_ok=True)
+            _teardown_foreground_startup(experiment, pidFilePath)
 
 
 @app.command()

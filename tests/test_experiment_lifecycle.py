@@ -723,6 +723,27 @@ class ExperimentOwnerDrainTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ExperimentShutdownTests(unittest.IsolatedAsyncioTestCase):
+    async def test_repeated_shutdown_requests_share_one_future(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        loop = mock.Mock()
+        loop.is_running.return_value = True
+        experiment.loop = loop
+        shutdown_future = mock.Mock()
+        shutdown_future.done.return_value = False
+
+        with mock.patch.object(
+            experiment_module.asyncio,
+            "run_coroutine_threadsafe",
+            return_value=shutdown_future,
+        ) as submit_shutdown:
+            first = experiment.request_shutdown("foreground_signal")
+            second = experiment.request_shutdown("foreground_signal")
+            submit_shutdown.call_args.args[0].close()
+
+        self.assertIs(first, shutdown_future)
+        self.assertIs(second, shutdown_future)
+        submit_shutdown.assert_called_once()
+
     async def test_shutdown_resets_devices_and_releases_runtime_resources(self):
         class Device:
             name = "camera"
