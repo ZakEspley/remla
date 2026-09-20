@@ -353,7 +353,7 @@ class ExperimentLifecycleTests(unittest.TestCase):
 
 
 class ExperimentCommandOperationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_ungrouped_command_is_tracked_and_completed(self):
+    async def test_single_device_lock_group_command_is_tracked_and_completed(self):
         class Device:
             name = "camera"
 
@@ -363,7 +363,9 @@ class ExperimentCommandOperationTests(unittest.IsolatedAsyncioTestCase):
         experiment = experiment_module.Experiment("RemoteLabs")
         experiment._runtime_state = "ready"
         experiment.ownership.connect("owner")
-        experiment.addDevice(Device())
+        device = Device()
+        experiment.addDevice(device)
+        experiment.addLockGroup("camera", [device])
         experiment.sendMessage = mock.AsyncMock()
         loop = mock.Mock()
 
@@ -377,9 +379,25 @@ class ExperimentCommandOperationTests(unittest.IsolatedAsyncioTestCase):
         operations = list(experiment.operation_registry.operations.values())
         self.assertEqual(len(operations), 1)
         self.assertEqual(operations[0].owner_id, "owner")
-        self.assertIsNone(operations[0].lock_group)
+        self.assertEqual(operations[0].lock_group, "camera")
         self.assertEqual(operations[0].status, "completed")
         experiment.sendMessage.assert_awaited_once_with("owner", "camera:capture:now")
+
+    def test_lock_group_validation_requires_each_device_exactly_once(self):
+        first = mock.Mock(name="first")
+        first.name = "first"
+        second = mock.Mock(name="second")
+        second.name = "second"
+        experiment = experiment_module.Experiment("RemoteLabs")
+        experiment.addDevice(first)
+        experiment.addDevice(second)
+        experiment.addLockGroup("first", [first])
+
+        with self.assertRaisesRegex(ValueError, "second"):
+            experiment.validate_lock_groups()
+
+        with self.assertRaisesRegex(ValueError, "already belongs"):
+            experiment.addLockGroup("duplicate", [first])
 
     async def test_command_timeout_returns_a_client_alert(self):
         experiment = experiment_module.Experiment("RemoteLabs")

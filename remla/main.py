@@ -908,17 +908,22 @@ def run(
 
             experiment.getControllerStates()
             locksConfig = labSettings.get("locks", {})
-            for lockGroup, deviceNames in locksConfig.items():
-                deviceObjects = [
-                    devices[name] for name in deviceNames if name in devices
-                ]
-                if len(deviceObjects) != len(deviceNames):
-                    missingDevices = set(deviceNames) - set(devices.keys())
-                    alert(
-                        f"Lock group '{lockGroup}' refers to undefined devices: {missingDevices}"
-                    )
-                    raise typer.Abort()
-                experiment.addLockGroup(lockGroup, deviceObjects)
+            try:
+                for lockGroup, deviceNames in locksConfig.items():
+                    deviceObjects = [
+                        devices[name] for name in deviceNames if name in devices
+                    ]
+                    if len(deviceObjects) != len(deviceNames):
+                        missingDevices = set(deviceNames) - set(devices.keys())
+                        alert(
+                            f"Lock group '{lockGroup}' refers to undefined devices: {missingDevices}"
+                        )
+                        raise typer.Abort()
+                    experiment.addLockGroup(lockGroup, deviceObjects)
+                experiment.validate_lock_groups()
+            except ValueError as error:
+                alert(f"Lock configuration error: {error}")
+                raise typer.Abort()
 
             success("Experiment setup complete.")
             get_boot_status()

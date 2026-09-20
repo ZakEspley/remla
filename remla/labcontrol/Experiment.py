@@ -179,11 +179,28 @@ class Experiment(object):
         self.devices[device.name] = device
 
     def addLockGroup(self, name: str, devices):
+        if name in self.lockGroups:
+            raise ValueError(f"Lock group '{name}' is defined more than once")
+        for device in devices:
+            existing_group = self.lockMapping.get(device.name)
+            if existing_group is not None:
+                raise ValueError(
+                    f"Device '{device.name}' already belongs to lock group "
+                    f"'{existing_group}'"
+                )
         lock = asyncio.Lock()
         self.lockGroups[name] = lock
         self.command_scheduler.add_lock_group(name)
         for device in devices:
             self.lockMapping[device.name] = name
+
+    def validate_lock_groups(self):
+        missing_devices = sorted(set(self.devices) - set(self.lockMapping))
+        if missing_devices:
+            raise ValueError(
+                "Devices must belong to exactly one lock group: "
+                + ", ".join(missing_devices)
+            )
 
     def recallState(self):
         return self.load_persisted_state()
@@ -490,6 +507,8 @@ class Experiment(object):
             raise NoDeviceError(deviceName)
 
         lock_group = self.lockMapping.get(deviceName)
+        if lock_group is None:
+            raise RuntimeError(f"Device '{deviceName}' has no lock group")
         operation = self.operation_registry.submit(
             websocket,
             deviceName,
