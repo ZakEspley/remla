@@ -123,6 +123,22 @@ class OperationRegistryTests(unittest.TestCase):
         self.assertEqual(waiting.status, "cancelled")
         self.assertEqual(running.status, "running")
 
+    def test_reset_cancels_waiting_operations_for_all_owners(self):
+        registry = OperationRegistry(max_outstanding_per_owner=3, clock=lambda: 100.0)
+        first_waiting = registry.submit("first", "camera", "switch", "camera", 30)
+        second_waiting = registry.submit("second", "motor", "move", "motion", 30)
+        running = registry.submit("first", "motor", "move", "motion", 30)
+        registry.start(running.operation_id, timestamp=101.0)
+
+        cancelled = registry.cancel_all_waiting(timestamp=102.0)
+
+        self.assertCountEqual(
+            cancelled, [first_waiting.operation_id, second_waiting.operation_id]
+        )
+        self.assertEqual(first_waiting.status, "cancelled")
+        self.assertEqual(second_waiting.status, "cancelled")
+        self.assertEqual(running.status, "running")
+
     def test_timeout_is_terminal_and_appears_in_unfinished_snapshot(self):
         registry = OperationRegistry(max_outstanding_per_owner=1, clock=lambda: 100.0)
         operation = registry.submit("owner", "motor", "move", "motion", 30)

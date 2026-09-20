@@ -804,8 +804,13 @@ def run(
     if foreground or wstest:
         pidFilePath.parent.mkdir(parents=True, exist_ok=True)
         pidFilePath.write_text(str(os.getpid()))
-    signal.signal(signal.SIGTERM, lambda signum, frame: cleanupPID())
-    signal.signal(signal.SIGINT, lambda signum, frame: cleanupPID())
+
+    def cleanup_startup_pid(signum, frame):
+        pidFilePath.unlink(missing_ok=True)
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGTERM, cleanup_startup_pid)
+    signal.signal(signal.SIGINT, cleanup_startup_pid)
     # perform initial camera cycling once per boot (if configured)
     cycle_camera = get_boot_status()
     logger = get_camera_logger()
@@ -868,11 +873,6 @@ def run(
             str(remlaSettings["currentLab"]), lab_config_content
         )
 
-        # Initialize devices from the lab settings
-        initialize_hardware_resources()
-        devices = createDevicesFromYml(labSettings["devices"])
-        print("Using devices:", labSettings["devices"])
-        # Create and setup the experiment
         if admin:
             experiment = Experiment(
                 "RemoteLabs",
@@ -886,42 +886,56 @@ def run(
             )
 
         experiment.initialize_runtime()
-        state_result = experiment.load_persisted_state()
-        if state_result is not None and state_result.message is not None:
-            warning(state_result.message)
 
-        for device in devices.values():
-            experiment.addDevice(device)
+        def request_foreground_shutdown(signum, frame):
+            shutdown_future = experiment.request_shutdown("foreground_signal")
+            if shutdown_future is None:
+                pidFilePath.unlink(missing_ok=True)
+                raise KeyboardInterrupt()
 
-        experiment.getControllerStates()
+        signal.signal(
+            signal.SIGTERM,
+            request_foreground_shutdown,
+        )
+        signal.signal(
+            signal.SIGINT,
+            request_foreground_shutdown,
+        )
+        try:
+            initialize_hardware_resources()
+            devices = createDevicesFromYml(labSettings["devices"])
+            print("Using devices:", labSettings["devices"])
+            state_result = experiment.load_persisted_state()
+            if state_result is not None and state_result.message is not None:
+                warning(state_result.message)
 
-        #### Now set up the locks.
-        locksConfig = labSettings.get("locks", {})
+            for device in devices.values():
+                experiment.addDevice(device)
 
-        for lockGroup, deviceNames in locksConfig.items():
-            try:
-                # Convert device names to device objects
+            experiment.getControllerStates()
+            locksConfig = labSettings.get("locks", {})
+            for lockGroup, deviceNames in locksConfig.items():
                 deviceObjects = [
                     devices[name] for name in deviceNames if name in devices
                 ]
-
-                # In case some devices listed in YAML are not initialized or missing
                 if len(deviceObjects) != len(deviceNames):
                     missingDevices = set(deviceNames) - set(devices.keys())
                     alert(
                         f"Lock group '{lockGroup}' refers to undefined devices: {missingDevices}"
                     )
                     raise typer.Abort()
-
-                # Apply the lock to the group of device objects
                 experiment.addLockGroup(lockGroup, deviceObjects)
-            except KeyError as e:
-                alert(f"Device name error in lock configuration: {str(e)}")
-                raise typer.Abort()
-        # Placeholder for further experiment execution logic
-        success("Experiment setup complete.")
-        get_boot_status()
-        experiment.startServer()
+
+            success("Experiment setup complete.")
+            get_boot_status()
+            experiment.startServer()
+        finally:
+            if experiment._runtime_state != "stopped":
+                try:
+                    experiment.request_shutdown("startup_failure")
+                except Exception as shutdown_error:
+                    warning(f"Startup teardown failed: {shutdown_error}")
+            pidFilePath.unlink(missing_ok=True)
 
 
 @app.command()

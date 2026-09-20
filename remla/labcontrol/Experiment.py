@@ -7,14 +7,20 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from signal import SIGINT, signal
+from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import urlopen
 
 import websockets
 
-from remla.labcontrol.hardware import gpio
+from remla.command_scheduler import CommandScheduler
+from remla.runtime_operations import (
+    OperationRegistry,
+    OperationTransitionError,
+    OutstandingOperationLimit,
+    OwnershipManager,
+)
 from remla.settings import *
 from remla.runtime_state import RuntimeStateStore, StateWriteError
 
@@ -27,6 +33,10 @@ class NoDeviceError(Exception):
         return "NoDeviceError: This experiment doesn't have a device, '{0}'".format(
             self.device_name
         )
+
+
+class CommandAdmissionError(Exception):
+    pass
 
 
 def runMethod(device, method, params):
@@ -69,6 +79,9 @@ class Experiment(object):
         admin=False,
         lab_config_identity=None,
         state_store=None,
+        max_outstanding_operations=16,
+        default_command_timeout=180,
+        handoff_timeout=60,
     ):
         self.name = name
         self.host = host
@@ -77,6 +90,15 @@ class Experiment(object):
 
         self.lockGroups = {}
         self.lockMapping = {}
+        self.max_outstanding_operations = max_outstanding_operations
+        self.default_command_timeout = default_command_timeout
+        self.handoff_timeout = handoff_timeout
+        self.ownership = OwnershipManager()
+        self.operation_registry = OperationRegistry(
+            max_outstanding_per_owner=max_outstanding_operations,
+            clock=time.monotonic,
+        )
+        self.command_scheduler = CommandScheduler(self.operation_registry, time.monotonic)
 
         self.allStates = {}
         self.lab_config_identity = lab_config_identity
@@ -86,6 +108,9 @@ class Experiment(object):
         self.state_writable = lab_config_identity is not None
         self.clients = deque()
         self.activeClient = None
+        self._handoff_timeout_task = None
+        self._client_command_tasks = {}
+        self._operation_tasks = {}
 
         self.initializedStates = False
         self.admin = admin
@@ -93,8 +118,13 @@ class Experiment(object):
         self.loop = None
         self.ipc_socket = None
         self.ipc_thread = None
+        self.ipc_path = None
+        self.server = None
         self._runtime_initialization_lock = threading.Lock()
+        self._shutdown_lock = asyncio.Lock()
+        self._shutdown_future = None
         self._runtime_state = "new"
+        self.last_fault = None
         self.logPath = logsDirectory / f"{self.name}.log"
 
     def initialize_runtime(self):
@@ -137,8 +167,11 @@ class Experiment(object):
                 raise
 
     def logException(self, task):
-        if task.exception():
-            logging.exception("Unknown Exception: %s", task.exception())
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error:
+            logging.error("Unknown Exception: %s", error)
 
     def addDevice(self, device):
         device.experiment = self
@@ -148,6 +181,7 @@ class Experiment(object):
     def addLockGroup(self, name: str, devices):
         lock = asyncio.Lock()
         self.lockGroups[name] = lock
+        self.command_scheduler.add_lock_group(name)
         for device in devices:
             self.lockMapping[device.name] = name
 
@@ -195,11 +229,17 @@ class Experiment(object):
     async def handleConnection(self, websocket, path):
         print("Connection!:", websocket, path)
         self.clients.append(websocket)  # Track all clients by their WebSocket
+        self.ownership.connect(websocket)
         try:
-            if self.activeClient is None and self.clients:
+            if self.can_accept_commands(websocket):
                 self.activeClient = websocket
                 await self.sendAlert(
                     websocket, "Experiment/controlStatus/1,You have control of the lab equipment."
+                )
+            elif self.ownership.handoff_user == websocket:
+                await self.sendAlert(
+                    websocket,
+                    "Experiment/controlStatus/0,Choose CONTROL/handoff/continue or CONTROL/handoff/reset.",
                 )
             else:
                 await self.sendAlert(
@@ -207,9 +247,11 @@ class Experiment(object):
                     "Experiment/controlStatus/0,You are connected but do not have control of the lab equipment.",
                 )
             async for command in websocket:
-                if websocket == self.activeClient:
+                if command.startswith("CONTROL/handoff/"):
+                    await self.processControlCommand(command, websocket)
+                elif self.can_accept_commands(websocket):
                     task = asyncio.create_task(self.processCommand(command, websocket))
-                    task.add_done_callback(self.logException)
+                    self.track_client_command_task(websocket, task)
                 else:
                     asyncio.create_task(
                         self.sendAlert(
@@ -218,23 +260,161 @@ class Experiment(object):
                     )
         finally:
             self.clients.remove(websocket)  # Remove client that closed connection
-            if (
-                websocket == self.activeClient
-            ):  # if the removed client was the active client
-                self.activeClient = (
-                    self.clients[0] if len(self.clients) > 0 else None
-                )  # set the first client in the list to be the new active client
-                if self.activeClient is not None:
-                    await self.sendAlert(
-                        self.activeClient, "Experiment/controlStatus/1,You are the new active client."
-                    )
-                print("the first client has changed!")
-                self.resetExperiment()
-                # logging.info("Looping through devices - resetting them.")
-                # for deviceName, device in self.devices.items():
-                #     logging.info("Running reset and cleanup on device " + deviceName)
-                #     device.reset()
-                # logging.info("Everything reset properly!")
+            await self.disconnect_client(websocket)
+
+    def track_client_command_task(self, websocket, task):
+        tasks = self._client_command_tasks.setdefault(websocket, set())
+        tasks.add(task)
+
+        def complete_task(completed_task):
+            tasks.discard(completed_task)
+            if not tasks:
+                self._client_command_tasks.pop(websocket, None)
+            self.logException(completed_task)
+
+        task.add_done_callback(complete_task)
+
+    async def disconnect_client(self, websocket):
+        was_active_owner = websocket == self.ownership.active_owner
+        if was_active_owner:
+            self.activeClient = None
+            await self.drain_owner_operations(websocket)
+
+        previous_handoff_user = self.ownership.handoff_user
+        self.ownership.disconnect(websocket)
+        self.activeClient = self.ownership.active_owner
+        if self.ownership.handoff_user != previous_handoff_user:
+            await self.notify_handoff_user()
+
+    async def drain_owner_operations(self, owner_id):
+        cancelled_operation_ids = self.operation_registry.cancel_waiting_for_owner(
+            owner_id, timestamp=time.monotonic()
+        )
+        await self.cancel_operation_tasks(cancelled_operation_ids)
+        operation_ids_by_task = {
+            task: operation_id for operation_id, task in self._operation_tasks.items()
+        }
+        tasks_to_cancel = []
+        for task in self._client_command_tasks.get(owner_id, set()):
+            operation_id = operation_ids_by_task.get(task)
+            if operation_id is None:
+                task.cancel()
+                tasks_to_cancel.append(task)
+
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+        await self.command_scheduler.wait_for_owner(owner_id)
+
+    async def cancel_queued_operations(self):
+        cancelled_operation_ids = self.operation_registry.cancel_all_waiting(
+            timestamp=time.monotonic()
+        )
+        await self.cancel_operation_tasks(cancelled_operation_ids)
+
+    async def cancel_operation_tasks(self, operation_ids):
+        tasks_to_cancel = [
+            task
+            for operation_id in operation_ids
+            if (task := self._operation_tasks.get(operation_id)) is not None
+            and task is not asyncio.current_task()
+        ]
+        for task in tasks_to_cancel:
+            task.cancel()
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+
+    async def processControlCommand(self, command, websocket):
+        if self._runtime_state != "ready":
+            await self.sendAlert(
+                websocket, "Experiment/controlStatus/0,The experiment is not accepting control actions."
+            )
+            return
+        try:
+            _, _, choice = command.split("/", 2)
+            self.ownership.choose_handoff(websocket, choice)
+        except (OperationTransitionError, ValueError):
+            await self.sendAlert(
+                websocket,
+                "Experiment/controlStatus/0,You do not have a pending control handoff.",
+            )
+            return
+        self.cancel_handoff_timeout()
+        if choice == "continue":
+            self.activeClient = websocket
+            await self.sendAlert(websocket, "Experiment/controlStatus/1,You have control of the lab equipment.")
+            return
+
+        await self.complete_handoff_reset(
+            websocket,
+            "Experiment/controlStatus/1,Reset complete. You have control of the lab equipment.",
+        )
+
+    def schedule_handoff_timeout(self):
+        self.cancel_handoff_timeout()
+        handoff_user = self.ownership.handoff_user
+        if handoff_user is None or self.ownership.handoff_state != "pending":
+            return
+        self._handoff_timeout_task = asyncio.create_task(
+            self.expire_handoff_after_timeout(handoff_user)
+        )
+
+    def cancel_handoff_timeout(self):
+        timeout_task = self._handoff_timeout_task
+        if timeout_task is not None and timeout_task is not asyncio.current_task():
+            timeout_task.cancel()
+        self._handoff_timeout_task = None
+
+    async def notify_handoff_user(self):
+        handoff_user = self.ownership.handoff_user
+        if handoff_user is None:
+            self.cancel_handoff_timeout()
+            return
+        await self.sendAlert(
+            handoff_user,
+            "Experiment/controlStatus/0,Choose CONTROL/handoff/continue or CONTROL/handoff/reset.",
+        )
+        self.schedule_handoff_timeout()
+
+    async def expire_handoff_after_timeout(self, handoff_user):
+        try:
+            await asyncio.sleep(self.handoff_timeout)
+        except asyncio.CancelledError:
+            return
+
+        if (
+            self.ownership.handoff_user != handoff_user
+            or self.ownership.handoff_state != "pending"
+        ):
+            return
+        self.ownership.choose_handoff(handoff_user, "reset")
+        await self.complete_handoff_reset(
+            handoff_user,
+            "Experiment/controlStatus/1,Handoff timed out. Reset complete. You have control of the lab equipment.",
+        )
+
+    async def complete_handoff_reset(self, websocket, success_message):
+        self._runtime_state = "resetting"
+        try:
+            await self.cancel_queued_operations()
+            await self.command_scheduler.wait_for_idle()
+            loop = asyncio.get_running_loop()
+            async with self.command_scheduler.reset_barrier():
+                await loop.run_in_executor(self.executor, self.resetExperiment)
+        except Exception as error:
+            self.ownership.complete_reset(success=False)
+            self.activeClient = self.ownership.active_owner
+            await self.enter_fault(f"Reset failed: {error}")
+            await self.sendAlert(websocket, f"Experiment/resetFailed/{error}")
+            return False
+
+        self.ownership.complete_reset(success=True)
+        self._runtime_state = "ready"
+        self.activeClient = self.ownership.active_owner
+        if self.activeClient == websocket:
+            await self.sendAlert(websocket, success_message)
+        elif self.ownership.handoff_user is not None:
+            await self.notify_handoff_user()
+        return True
 
     async def processCommand(self, command, websocket):
         print(f"Processing Command {command} from {websocket}")
@@ -245,80 +425,69 @@ class Experiment(object):
             print("Raising no device error")
             raise NoDeviceError(deviceName)
 
-        await self.runDeviceMethod(deviceName, cmd, params, websocket)
+        try:
+            await self.runDeviceMethod(deviceName, cmd, params, websocket)
+        except CommandAdmissionError:
+            await self.sendAlert(
+                websocket, "Experiment/operationRejected/notAcceptingCommands"
+            )
+        except OutstandingOperationLimit:
+            await self.sendAlert(
+                websocket, "Experiment/operationRejected/outstandingOperationLimit"
+            )
+        except asyncio.TimeoutError:
+            await self.enter_fault(f"Operation timed out: {deviceName}/{cmd}")
+            await self.cancel_queued_operations()
+            await self.sendAlert(
+                websocket, f"Experiment/operationTimedOut/{deviceName}/{cmd}"
+            )
+
+    def can_accept_commands(self, websocket):
+        return self._runtime_state == "ready" and self.ownership.can_submit(websocket)
+
+    async def enter_fault(self, message):
+        self._runtime_state = "faulted"
+        self.last_fault = message
+        await self.sendCommandToAllClients(f"fault/{message}")
 
     async def runDeviceMethod(self, deviceName, method, params, websocket):
+        if not self.can_accept_commands(websocket):
+            raise CommandAdmissionError("experiment is not accepting commands")
         device = self.devices.get(deviceName)
-        response_type = "MESSAGE"
-        result = None
-        camera_switch = (
-            method in {"camera", "cameraName"}
-            and device.__class__.__name__ == "PiCamera2MultiCam"
-            and getattr(device, "cameraSwitchMode", "restart") != "hot"
-            and (not params or str(params[0]).lower() != "off")
-        )
-        switch_id = str(time.monotonic_ns()) if camera_switch else None
+        if device is None:
+            raise NoDeviceError(deviceName)
 
-        lockGroupName = self.lockMapping.get(deviceName)
-        if lockGroupName:
-            async with self.lockGroups[lockGroupName]:
-                loop = asyncio.get_event_loop()
-                if camera_switch:
-                    stream_path = getattr(device, "streamPath", "cam")
-                    path_state = await loop.run_in_executor(
-                        self.executor, getMediaMTXPath, stream_path
-                    )
-                    previous_source_id = (path_state.get("source") or {}).get("id")
-                    switch_started_at = time.monotonic()
-                    await self.sendCommandToAllClients(f"cameraSwitchStarted/{switch_id}")
-                try:
-                    response = await loop.run_in_executor(
-                        self.executor, runMethod, device, method, params
-                    )
-                except Exception:
-                    if camera_switch:
-                        await self.sendCommandToAllClients(f"cameraSwitchFailed/{switch_id}")
-                    raise
-                if camera_switch:
-                    pipeline_ready_at = time.monotonic()
-                    persistent_publisher = getattr(device, "persistentPublisher", False)
-                    if persistent_publisher:
-                        online = await loop.run_in_executor(
-                            self.executor, device.waitForPublisherFrame
-                        )
-                    else:
-                        online = await loop.run_in_executor(
-                            self.executor,
-                            waitForMediaMTXOnline,
-                            stream_path,
-                            previous_source_id,
-                        )
-                    online_at = time.monotonic()
-                    pipeline_ms = round((pipeline_ready_at - switch_started_at) * 1000)
-                    online_ms = round((online_at - switch_started_at) * 1000)
-                    if online:
-                        state = "frame" if persistent_publisher else "online"
-                        await self.sendCommandToAllClients(
-                            f"cameraSwitchReady/{switch_id}/{state}/{pipeline_ms}/{online_ms}"
-                        )
-                    else:
-                        await self.sendCommandToAllClients(
-                            f"cameraSwitchFailed/{switch_id}/timeout/{pipeline_ms}/{online_ms}"
-                        )
-                if response is None:
-                    result = None
-                elif isinstance(response, (list, tuple)):
-                    if len(response) > 1:
-                        response_type = response[0]
-                        result = response[1]
-                    elif len(response) == 1:
-                        result = response[0]
-                else:
-                    result = response
-        else:
-            logging.error("All devices need a lock")
-            raise
-            # result = await self.runMethod(device, method, params)
+        lock_group = self.lockMapping.get(deviceName)
+        operation = self.operation_registry.submit(
+            websocket,
+            deviceName,
+            method,
+            lock_group,
+            self.default_command_timeout,
+        )
+        task = asyncio.current_task()
+        if task is not None:
+            self._operation_tasks[operation.operation_id] = task
+        try:
+            response = await self.command_scheduler.execute(
+                operation,
+                lambda: self._execute_device_method(device, method, params),
+            )
+        finally:
+            if self._operation_tasks.get(operation.operation_id) is task:
+                self._operation_tasks.pop(operation.operation_id, None)
+
+        response_type = "MESSAGE"
+        result = response
+        if isinstance(response, (list, tuple)):
+            if len(response) > 1:
+                response_type = response[0]
+                result = response[1]
+            elif len(response) == 1:
+                result = response[0]
+            else:
+                result = None
+
         if result is not None:
             logging.info(f"Device {deviceName} ran {method} with result: {result}")
             if response_type == "ALERT":
@@ -328,19 +497,74 @@ class Experiment(object):
         else:
             await self.sendMessage(websocket, f"{deviceName} ran {method}")
 
+    async def _execute_device_method(self, device, method, params):
+        camera_switch = (
+            method in {"camera", "cameraName"}
+            and device.__class__.__name__ == "PiCamera2MultiCam"
+            and getattr(device, "cameraSwitchMode", "restart") != "hot"
+            and (not params or str(params[0]).lower() != "off")
+        )
+        switch_id = str(time.monotonic_ns()) if camera_switch else None
+        loop = asyncio.get_event_loop()
+        if camera_switch:
+            stream_path = getattr(device, "streamPath", "cam")
+            path_state = await loop.run_in_executor(self.executor, getMediaMTXPath, stream_path)
+            previous_source_id = (path_state.get("source") or {}).get("id")
+            switch_started_at = time.monotonic()
+            await self.sendCommandToAllClients(f"cameraSwitchStarted/{switch_id}")
+        try:
+            response = await loop.run_in_executor(
+                self.executor, runMethod, device, method, params
+            )
+        except Exception:
+            if camera_switch:
+                await self.sendCommandToAllClients(f"cameraSwitchFailed/{switch_id}")
+            raise
+        if camera_switch:
+            pipeline_ready_at = time.monotonic()
+            persistent_publisher = getattr(device, "persistentPublisher", False)
+            if persistent_publisher:
+                online = await loop.run_in_executor(
+                    self.executor, device.waitForPublisherFrame
+                )
+            else:
+                online = await loop.run_in_executor(
+                    self.executor,
+                    waitForMediaMTXOnline,
+                    stream_path,
+                    previous_source_id,
+                )
+            online_at = time.monotonic()
+            pipeline_ms = round((pipeline_ready_at - switch_started_at) * 1000)
+            online_ms = round((online_at - switch_started_at) * 1000)
+            if online:
+                state = "frame" if persistent_publisher else "online"
+                await self.sendCommandToAllClients(
+                    f"cameraSwitchReady/{switch_id}/{state}/{pipeline_ms}/{online_ms}"
+                )
+            else:
+                await self.sendCommandToAllClients(
+                    f"cameraSwitchFailed/{switch_id}/timeout/{pipeline_ms}/{online_ms}"
+                )
+        return response
+
     def startServer(self):
-        # This function sets up and runs the WebSocket server indefinitely
-        # loop = asyncio.new_event_loop()
         with self._runtime_initialization_lock:
             if self._runtime_state != "ready":
                 raise RuntimeError("Experiment runtime is not initialized")
             loop = self.loop
         asyncio.set_event_loop(loop)
-        start_server = websockets.serve(self.handleConnection, self.host, self.port)
 
         print(f"Server started at ws://{self.host}:{self.port}")
-        loop.run_until_complete(start_server)
-        loop.run_forever()
+        try:
+            self.server = loop.run_until_complete(
+                websockets.serve(self.handleConnection, self.host, self.port)
+            )
+            loop.run_forever()
+        finally:
+            if self._runtime_state != "stopped":
+                loop.run_until_complete(self.shutdown("server_stopped"))
+            loop.close()
 
     async def sendDataToClient(self, websocket, dataStr: str):
         try:
@@ -373,96 +597,6 @@ class Experiment(object):
             names.append(deviceName)
         return names
 
-    async def onClientDisconnect(self, websocket):
-        # Remove client from the client queue if they disconnect
-        if websocket in self.clients:
-            self.clients.remove(websocket)
-        if websocket == self.activeClient:
-            self.activeClient = None
-            # Pass control to the next available client in the queue
-            while self.clientQueue:
-                potentialController = self.clientQueue.popleft()
-                if potentialController.open:
-                    self.activeClient = potentialController
-                    await self.sendMessage(
-                        self.activeClient, "You now have control of the lab equipment."
-                    )
-                    break
-            if not self.activeClient:
-                print("No active clients")
-                logging.info("No active clients")
-                self.activeClient = None
-
-            logging.info(f"Active client disconnected: {websocket}.")
-        else:
-            logging.info(f"Non-active client disconnected: {websocket}.")
-
-    def exitHandler(self, signalReceived, frame):
-        logging.info("Attempting to exit")
-        if self.socket is not None:
-            self.socket.close()
-            logging.info("Socket is closed")
-
-        # if self.messengerSocket is not None:
-        #     self.messengerSocket.close()
-        #     logging.info("Messenger socket closed")
-
-        if not self.admin:
-            self.resetExperiment()
-        else:
-            gpio.cleanup()
-        exit(0)
-
-    def setupSignalHandlers(self):
-        signal.signal(signal.SIGINT, self.exitHandler)
-        signal.signal(signal.SIGTERM, self.exitHandler)
-
-    def closeHandler(self):
-        logging.info("Client Disconnected. Handling Close.")
-        if self.connection is not None:
-            self.connection.close()
-            logging.info("Connection to client closed.")
-        if not self.admin:
-            for deviceName, device in self.devices.items():
-                logging.info("Running reset on device " + deviceName)
-                device.reset()
-
-    def setup(self):
-        try:
-            if not self.initializedStates:
-                self.getControllerStates()
-            if not os.path.exists(self.socketPath):
-                f = open(self.socketPath, "w")
-                f.close()
-
-            # if self.messenger is not None:
-            #     self.messengerThread = threading.Thread(
-            #         target=self.messenger.setup, daemon=True
-            #     )
-            #     self.messengerThread.start()
-            os.unlink(self.socketPath)
-            self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-            signal(SIGINT, self.exitHandler)
-            signal(SIGTERM, self.exitHandler)
-            self.socket.bind(self.socketPath)
-            self.socket.listen(1)
-            self.socket.setTimeout(1)
-            self.__waitToConnect()
-        except OSError:
-            if os.path.exists(self.socketPath):
-                print(
-                    f"Error accessing {self.socketPath}\nTry running 'sudo chown pi: {self.socketPath}'"
-                )
-                os._exit(0)
-                return
-            else:
-                print(
-                    f"Socket file not found. Did you configure uv4l-uvc.conf to use {self.socketPath}?"
-                )
-                raise
-            logging.error("Socket Error!", exc_info=True)
-            print(f"Socket error: {err}")
-
     def startIpcListener(self, ipc_path="/tmp/remla_cmd.sock", loop=None):
         if loop is None:
             loop = self.loop
@@ -485,8 +619,18 @@ class Experiment(object):
 
         def ipc_loop():
             while True:
-                conn, _ = ipc_sock.accept()
-                data = conn.recv(1024).decode().strip()
+                try:
+                    conn, _ = ipc_sock.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return
+                conn.settimeout(0.25)
+                try:
+                    data = conn.recv(1024).decode().strip()
+                except (OSError, socket.timeout):
+                    conn.close()
+                    continue
                 if data in ["boot", "contact"]:
                     # Send message to active client
                     if self.activeClient:
@@ -504,6 +648,8 @@ class Experiment(object):
             ipc_sock.bind(ipc_path)
             bound = True
             ipc_sock.listen(1)
+            ipc_sock.settimeout(0.25)
+            self.ipc_path = Path(ipc_path)
             print(f"IPC listener started at {ipc_path}")
             ipc_thread = threading.Thread(target=ipc_loop, daemon=True)
             ipc_thread.start()
@@ -513,6 +659,67 @@ class Experiment(object):
             ipc_sock.close()
             raise
         return ipc_sock, ipc_thread
+
+    def request_shutdown(self, reason):
+        loop = self.loop
+        if loop is None:
+            return None
+        if not loop.is_running():
+            loop.run_until_complete(self.shutdown(reason))
+            return None
+        if self._shutdown_future is None or self._shutdown_future.done():
+            self._shutdown_future = asyncio.run_coroutine_threadsafe(
+                self.shutdown(reason), loop
+            )
+        return self._shutdown_future
+
+    async def shutdown(self, reason):
+        async with self._shutdown_lock:
+            if self._runtime_state == "stopped":
+                return
+
+            logging.info("Shutting down experiment: %s", reason)
+            self._runtime_state = "stopping"
+            self.cancel_handoff_timeout()
+            shutdown_error = None
+            try:
+                await self.cancel_queued_operations()
+                await self.command_scheduler.wait_for_idle()
+                loop = asyncio.get_running_loop()
+                async with self.command_scheduler.reset_barrier():
+                    if self.executor is not None:
+                        await loop.run_in_executor(self.executor, self.resetExperiment)
+            except BaseException as error:
+                shutdown_error = error
+                self.last_fault = f"Shutdown failed: {error}"
+            finally:
+                if self.server is not None:
+                    self.server.close()
+                    try:
+                        await self.server.wait_closed()
+                    except Exception as error:
+                        if shutdown_error is None:
+                            shutdown_error = error
+                    self.server = None
+                self.close_ipc_listener()
+                if self.executor is not None:
+                    self.executor.shutdown(wait=True, cancel_futures=True)
+                self._runtime_state = "stopped"
+
+            if self.loop is not None and self.loop.is_running():
+                self.loop.call_soon(self.loop.stop)
+            if shutdown_error is not None:
+                raise shutdown_error
+
+    def close_ipc_listener(self):
+        if self.ipc_socket is not None:
+            self.ipc_socket.close()
+            self.ipc_socket = None
+        if self.ipc_thread is not None:
+            self.ipc_thread.join(timeout=1)
+            self.ipc_thread = None
+        if self.ipc_path is not None:
+            self.ipc_path.unlink(missing_ok=True)
 
     def resetExperiment(self):
         logging.info("Resetting experiment to original state.")

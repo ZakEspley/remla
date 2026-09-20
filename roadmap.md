@@ -1,7 +1,7 @@
 # Roadmap
 
 ## Scope and confirmed decisions
-- This is the implementation plan for reliable runtime state, controlled resets, shutdown, and command scheduling. No runtime behavior implementation has started.
+- This is the implementation plan for reliable runtime state, controlled resets, shutdown, and command scheduling. Versioned state diagnostics, operation models, scheduler fencing, FIFO handoff, and initial coordinator teardown are implemented; controller audit, state publication, recovery, and full shutdown coverage remain.
 - Initial deployments permit anonymous control from a trusted network. Keep origin, connection, rate, command-validation, and physical safety controls; do not add user authentication in this work.
 - Production installation should ultimately use an unprivileged `remla` service account and a stable UV-managed runtime location. Provisioning remains a separate concern from runtime behavior.
 - `UPDATE_PLAN.md` remains authoritative for the camera-cycle requirement. The camera work below must preserve: cycle only in `remla run`, exactly once per boot, and restart MediaMTX per channel.
@@ -15,17 +15,13 @@
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
 ## Current runtime defects to remove
-- `Experiment.__init__` starts the IPC listener and owns an event loop, but does not initialize `jsonFile`, `socketPath`, `connection`, or `clientQueue` (`remla/labcontrol/Experiment.py`).
-- `recallState()` and `getControllerStates()` dereference the missing `jsonFile`; state persistence is therefore non-functional.
-- `handleConnection()` creates an unbounded task per active-client command. Its `finally` block promotes a waiting client and then synchronously resets every device, without queueing, locking, or reset completion before promotion.
-- `onClientDisconnect()` is unused and references the missing `clientQueue`; it conflicts with the connection-finally implementation.
-- `resetExperiment()` runs blocking hardware reset methods on the event-loop thread and can race a command already running in `ThreadPoolExecutor`.
-- `runDeviceMethod()` rejects every device without a YAML lock mapping. Its lock groups retain useful command serialization, but they are not integrated with user ownership, operation tracking, disconnect cancellation, reset barriers, or lifecycle state.
-- `main.run()` handles SIGINT/SIGTERM by deleting the PID file and calling `sys.exit`; it never asks `Experiment` to stop work, reset devices, close camera resources, close IPC, or shut down the executor.
-- `Experiment` has a second, unused and broken signal/socket lifecycle: `setupSignalHandlers()` uses the wrong `signal` import; `setup()` uses `setTimeout`; the legacy AF_UNIX socket fields are unset.
+- `handleConnection()` tracks each active-client command task. On owner loss it cancels queued operations, waits for scheduler-tracked work to finish, then promotes the next FIFO user into the timed handoff state; lifecycle and transport state transitions are not yet published.
+- `resetExperiment()` remains a blocking legacy helper; use `Experiment.shutdown()` or handoff reset so scheduler fencing applies.
+- `runDeviceMethod()` tracks every device command and applies optional lock-group serialization. Handoff resets and shutdown cancel queued operations, drain scheduler work, and acquire every configured scheduler lock; timeout/reset faults block admission and emit a legacy fault event, while structured state publication and fault recovery remain unfinished.
+- After runtime initialization, foreground SIGINT/SIGTERM request coordinator shutdown. Foreground startup failure invokes coordinator teardown before PID removal; service/CLI stop still use separate paths.
 - `stop()` stops the systemd service and may signal a foreground PID, but does not use one shared teardown contract.
-- Controller imports create pigpio, GPIO, and VISA resources at module import time. Several controller `reset()` methods are no-ops, while `PiCamera2MultiCam.close()` has cleanup that runtime shutdown does not call.
-- The IPC listener owns `/tmp/remla_cmd.sock` outside the main shutdown path and accepts only ad-hoc text notifications.
+- Several controller `reset()` methods are no-ops, while `PiCamera2MultiCam.close()` has cleanup that runtime shutdown does not call.
+- The IPC listener is closed and unlinked by coordinator shutdown but still accepts only ad-hoc text notifications.
 - `init()` can still duplicate the per-boot camera cycle; see `UPDATE_PLAN.md`.
 
 ## Target runtime contract
@@ -78,7 +74,7 @@
 - [x] Move pigpio, GPIO, and VISA resource acquisition out of `Controllers.py` import scope. `main.run()` initializes them explicitly before foreground device construction, and `tests.test_runtime_imports` covers non-Pi imports and fake resource creation.
 - [x] Replace the root `boottime` smoke script with `tests.test_boot_status`, which verifies the camera-cycle boot marker using temporary files and a mocked boot timestamp.
 - [x] Make `main.run()` explicitly initialize `Experiment` runtime resources. `Experiment.__init__` creates no executor, event loop, IPC socket, thread, logging file, or signal handler; initialization is idempotent, serializes competing calls, and rolls back failed IPC startup.
-- [ ] Make `main.run()` own final shutdown; `Experiment` must release its executor, IPC listener, and event loop through one coordinator teardown path.
+- [ ] `Experiment.shutdown()` now drains work, resets devices, closes WebSocket/IPC resources, and shuts down the executor idempotently. Foreground startup failure and final event-loop closure use this contract; route CLI stop and service-mode shutdown through it.
 
 **Exit criteria:** importing runtime modules on a non-Pi host succeeds; a fake runtime can start and stop without files, threads, sockets, tasks, or executor workers left behind.
 
@@ -92,20 +88,20 @@
 **Tests:** clean start; valid round trip; corrupt file; schema mismatch; changed lab configuration; command success/failure state transitions; write failure.
 
 ### 3. Implement the user queue, tracked lock-group operations, and reset barrier
-- [x] Add hardware-free FIFO ownership and operation lifecycle models. They track handoff-pending/resetting ownership, operation IDs, optional lock groups, outstanding limits, and terminal outcomes without changing command execution yet.
-- [x] Add a hardware-free scheduler that serializes async commands by named lock group while allowing ungrouped commands to run concurrently. WebSocket and hardware-command integration remains pending.
-- [ ] Replace `handleConnection()` task creation, its `finally` reset, and `onClientDisconnect()` with one FIFO ownership manager. Preserve the existing per-lock-group command concurrency.
-- [ ] Register/unregister every active-user operation and its lock group; make client promotion, waiting-user status, operation cancellation, reset start/completion, and owner loss observable state transitions.
+- [x] Add hardware-free FIFO ownership and operation lifecycle models. They track handoff-pending/resetting ownership, operation IDs, optional lock groups, outstanding limits, and terminal outcomes.
+- [x] Add a hardware-free scheduler that serializes async commands by named lock group while allowing ungrouped commands to run concurrently. `Experiment.runDeviceMethod()` now submits each accepted device command to this scheduler and records its terminal outcome.
+- [ ] Replace `handleConnection()` task creation and `onClientDisconnect()` with one FIFO ownership manager. Legacy disconnect handling is removed; handoff choices validate the pending user; owner loss cancels queued work and drains scheduler-tracked work before promotion; an unanswered 60-second handoff requests reset. Publish transition events.
+- [ ] Command execution registers operations with optional lock groups, reports outstanding-limit/time-out rejection, retains named locks until timed-out command work ends, and cancels queued operations before handoff reset. Timeout faults now fence admission and emit a legacy event; publish structured ownership/operation/reset transitions and add authorized fault recovery.
 - [ ] Convert the existing lock mapping into startup validation. Fail before serving if any command-capable device lacks explicit scheduling metadata, including an intentional no-lock-group declaration.
 - [ ] Route camera-switch progress through operation IDs and state events rather than separate uncorrelated command strings.
 - [ ] Add outstanding-operation limits, timeout, cancellation, and terminal-result handling without introducing a global command queue.
 - [ ] Design the scheduler boundary: compare explicit lock ownership with FIFO workers per named lock group, while preserving concurrent execution for ungrouped commands.
 
-**Tests:** FIFO user promotion into handoff-pending state; inactive-user rejection; same-lock serialization; independent-lock and ungrouped-command concurrency; outstanding-operation limit; active-user disconnect before lock acquisition; disconnect during execution; handoff continue/reset and automatic reset timeout; reset failure; command timeout freezes admission without automatic reset; camera progress correlation.
+**Tests:** FIFO user promotion into handoff-pending state; inactive-user rejection; same-lock serialization; independent-lock and ungrouped-command concurrency; outstanding-operation limit; active-user disconnect before lock acquisition; disconnect during execution; handoff continue/reset and automatic reset timeout; reset failure; timeout followed by a same-lock command while executor work remains active; command timeout freezes admission without automatic reset; camera progress correlation.
 
 ### 4. Implement unified shutdown and controller safety audit
-- [ ] Introduce one coordinator teardown sequence: enter `stopping`; stop admission; cancel operations waiting for lock acquisition; resolve active work; reset/close in dependency order; persist state; close WebSocket server, IPC, sockets, executor, and hardware resources; remove PID; enter `stopped`.
-- [ ] Route foreground signals, systemd termination, CLI stop, startup failure, and explicit reset through this sequence with their stated reset reason.
+- [ ] Coordinator teardown enters `stopping`, cancels queued operations, drains active scheduler work, resets devices behind a barrier, closes WebSocket/IPC resources, and shuts down the executor. Add dependency ordering, persistence, hardware-resource release, PID cleanup, and reset-error aggregation.
+- [ ] Route foreground signals and startup failure through coordinator shutdown. Route systemd termination, CLI stop, and explicit reset through the same sequence with their stated reset reason.
 - [ ] Audit every controller reset at the locations reported above. Replace no-op actuator resets with safe outputs; classify sensor-only controllers explicitly; add close/release where reset is not sufficient.
 - [ ] Integrate `PiCamera2MultiCam.close()` and any equivalent ArduCam cleanup into the controller contract.
 - [ ] Remove direct `exit()`, `os._exit()`, and independent cleanup paths that bypass the coordinator.

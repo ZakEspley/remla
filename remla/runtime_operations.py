@@ -191,9 +191,15 @@ class OperationRegistry:
         return operation
 
     def cancel_waiting_for_owner(self, owner_id: str, timestamp: float) -> list[str]:
+        return self._cancel_waiting(timestamp, lambda operation: operation.owner_id == owner_id)
+
+    def cancel_all_waiting(self, timestamp: float) -> list[str]:
+        return self._cancel_waiting(timestamp, lambda operation: True)
+
+    def _cancel_waiting(self, timestamp: float, predicate) -> list[str]:
         cancelled = []
         for operation in self.operations.values():
-            if operation.owner_id == owner_id and operation.status == "queued":
+            if predicate(operation) and operation.status == "queued":
                 operation.status = "cancelled"
                 operation.finished_at = timestamp
                 cancelled.append(operation.operation_id)
