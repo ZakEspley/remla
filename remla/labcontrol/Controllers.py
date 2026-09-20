@@ -126,8 +126,9 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
     def reset(self):
         pass
 
+    @abstractmethod
     def safe_stop(self):
-        return None
+        pass
 
     def getState(self):
         return self.state
@@ -220,6 +221,9 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
         for outlet in self.outlets:
             self.off(outlet)
 
+    def safe_stop(self):
+        self.reset()
+
 
 class Plug(tp.TPLinkSmartDevice, BaseController):
     deviceType = "controller"
@@ -249,6 +253,9 @@ class Plug(tp.TPLinkSmartDevice, BaseController):
     def reset(self):
         super().send({"system": {"set_relay_state": {"state": 0}}})
         super().close()
+
+    def safe_stop(self):
+        self.reset()
 
 
 class StepperSimple(stp.Motor, BaseController):
@@ -290,6 +297,9 @@ class StepperSimple(stp.Motor, BaseController):
 
     def reset(self):
         super().reset()
+
+    def safe_stop(self):
+        self.release()
 
 
 class DCMotorI2C(MotorKit, BaseController):
@@ -515,6 +525,9 @@ class StepperI2C(MotorKit, BaseController):
         else:
             self.move(-self.currentPosition)
 
+    def safe_stop(self):
+        self.device.release()
+
     def home(self, params):
         if self.homeSwitch is not None:
             self.homing = True
@@ -590,6 +603,9 @@ class FilterStepperI2C(StepperI2C):
         else:
             super().goto(position)
 
+    def safe_stop(self):
+        super().safe_stop()
+
 
 class AbsorberController(BaseController):  # Removed MotorKit subclass @ZakEspley
     deviceType = "controller"
@@ -642,6 +658,11 @@ class AbsorberController(BaseController):  # Removed MotorKit subclass @ZakEsple
         movesList = self.__makeMovesList(emptyCounter)
         self.place(movesList)
         self.stepper.reset()
+
+    def safe_stop(self):
+        self.stepper.safe_stop()
+        self.actuator.safe_stop()
+        self.magnet.safe_stop()
 
     def __transfer(self, slot1, slot2):
         # TODO: magnet control needs to be fixed
@@ -1103,6 +1124,9 @@ class Multiplexer(BaseController):
             self.__setChannel(self.defaultChannel)
         gpio.output(self.inhibitorPin, self.defaultState)
 
+    def safe_stop(self):
+        gpio.output(self.inhibitorPin, gpio.HIGH)
+
 
 class Keithley6514Electrometer(BaseController):
     deviceType = "measurement"
@@ -1130,6 +1154,9 @@ class Keithley6514Electrometer(BaseController):
     def reset(self):
         pass
 
+    def safe_stop(self):
+        pass
+
 
 class Keithley2000Multimeter(BaseController):
     deviceType = "measurement"
@@ -1153,6 +1180,9 @@ class Keithley2000Multimeter(BaseController):
         return params[0]
 
     def reset(self):
+        pass
+
+    def safe_stop(self):
         pass
 
 
@@ -1310,6 +1340,10 @@ class PololuStepperMotor(BaseController):
         else:
             self.move(-self.currentPosition)
         # pass
+
+    def safe_stop(self):
+        pi.wave_tx_stop()
+        pi.write(self.enablePin, 0)
 
     def home(self, params):
         if self.homeSwitch is not None:
@@ -1547,6 +1581,9 @@ class ArduCamMultiCamera(BaseController):
             for setting, value in self.defaultSettings.items():
                 self.imageMod([setting, value])
                 time.sleep(0.1)
+
+    def safe_stop(self):
+        self.camera("off")
 
 
 class PiCamera2MultiCam(BaseController):
@@ -2416,6 +2453,8 @@ class PiCamera2MultiCam(BaseController):
         self.state["camera"] = self.active_slot
 
     def close(self):
+        if self._closing:
+            return
         atexit.unregister(self.close)
         self._closing = True
         self._release_camera()
@@ -2451,6 +2490,9 @@ class ElectronicScreen(BaseController):
     def reset(self):
         gpio.output(self.pin, gpio.LOW)
 
+    def safe_stop(self):
+        self.reset()
+
 
 class LimitSwitch(BaseController):
     deviceType = "controller"
@@ -2472,6 +2514,9 @@ class LimitSwitch(BaseController):
     def reset(self):
         pass
 
+    def safe_stop(self):
+        pass
+
 
 class HomeSwitch(BaseController):
     deviceType = "controller"
@@ -2488,6 +2533,9 @@ class HomeSwitch(BaseController):
         return state
 
     def reset(self):
+        pass
+
+    def safe_stop(self):
         pass
 
 
@@ -2513,6 +2561,9 @@ class SingleGPIO(BaseController):
 
     def reset(self):
         gpio.output(self.pin, gpio.LOW)
+
+    def safe_stop(self):
+        self.reset()
 
 
 class PushButton(BaseController):
@@ -2544,6 +2595,9 @@ class PushButton(BaseController):
     def reset(self):
         gpio.output(self.pin, gpio.LOW)
 
+    def safe_stop(self):
+        self.reset()
+
 
 class PWMChannel(BaseController):
     deviceType = "controller"
@@ -2574,6 +2628,10 @@ class PWMChannel(BaseController):
 
     def reset(self):
         self.pwm.ChangeDutyCycle(self.defaultDutyCycle)
+
+    def safe_stop(self):
+        self.pwm.ChangeDutyCycle(0)
+        self.pwm.stop()
 
 
 class S42CStepperMotor(BaseController):
@@ -2879,6 +2937,10 @@ class S42CStepperMotor(BaseController):
 
     def reset(self):
         return self.move(-self.curPos)
+
+    def safe_stop(self):
+        self.pi.wave_tx_stop()
+        self.pi.write(self.EN, 1)
 
 
 class FS5103RContinuousMotor(BaseController):

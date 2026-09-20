@@ -786,6 +786,73 @@ class ExperimentShutdownTests(unittest.IsolatedAsyncioTestCase):
         loop.call_soon.assert_called_once_with(loop.stop)
         self.assertEqual(experiment._runtime_state, "stopped")
 
+    async def test_fault_shutdown_safe_stops_without_resetting(self):
+        class Device:
+            name = "motor"
+
+            def __init__(self):
+                self.reset_called = False
+                self.safe_stop_called = False
+
+            def reset(self):
+                self.reset_called = True
+
+            def safe_stop(self):
+                self.safe_stop_called = True
+
+        experiment = experiment_module.Experiment("RemoteLabs")
+        device = Device()
+        experiment.addDevice(device)
+        experiment._runtime_state = "faulted"
+        experiment.executor = mock.Mock()
+        loop = mock.Mock()
+
+        async def run_in_executor(executor, function, *args):
+            return function(*args)
+
+        loop.run_in_executor = mock.AsyncMock(side_effect=run_in_executor)
+        with mock.patch.object(
+            experiment_module.asyncio, "get_running_loop", return_value=loop
+        ):
+            await experiment.shutdown("fault")
+
+        self.assertFalse(device.reset_called)
+        self.assertTrue(device.safe_stop_called)
+        loop.run_in_executor.assert_awaited_once_with(
+            experiment.executor, experiment.safeStopExperiment
+        )
+
+    async def test_graceful_shutdown_safe_stops_when_reset_fails(self):
+        class Device:
+            name = "motor"
+
+            def __init__(self):
+                self.safe_stop_called = False
+
+            def reset(self):
+                raise RuntimeError("reset failed")
+
+            def safe_stop(self):
+                self.safe_stop_called = True
+
+        experiment = experiment_module.Experiment("RemoteLabs")
+        device = Device()
+        experiment.addDevice(device)
+        experiment._runtime_state = "ready"
+        experiment.executor = mock.Mock()
+        loop = mock.Mock()
+
+        async def run_in_executor(executor, function, *args):
+            return function(*args)
+
+        loop.run_in_executor = mock.AsyncMock(side_effect=run_in_executor)
+        with mock.patch.object(
+            experiment_module.asyncio, "get_running_loop", return_value=loop):
+            with self.assertRaisesRegex(RuntimeError, "reset failed"):
+                await experiment.shutdown("foreground_signal")
+
+        self.assertTrue(device.safe_stop_called)
+
 
 class ExperimentFaultTests(unittest.IsolatedAsyncioTestCase):
     async def test_fault_transition_blocks_admission_and_publishes_legacy_event(self):

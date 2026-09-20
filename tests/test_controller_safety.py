@@ -7,6 +7,38 @@ controllers = importlib.import_module("remla.labcontrol.Controllers")
 
 
 class ControllerSafeStopTests(unittest.TestCase):
+    def test_every_concrete_controller_declares_safe_stop(self):
+        controller_types = [
+            controllers.PDUOutlet,
+            controllers.Plug,
+            controllers.StepperSimple,
+            controllers.DCMotorI2C,
+            controllers.StepperI2C,
+            controllers.FilterStepperI2C,
+            controllers.AbsorberController,
+            controllers.Multiplexer,
+            controllers.Keithley6514Electrometer,
+            controllers.Keithley2000Multimeter,
+            controllers.PololuStepperMotor,
+            controllers.PololuDCMotor,
+            controllers.ArduCamMultiCamera,
+            controllers.PiCamera2MultiCam,
+            controllers.ElectronicScreen,
+            controllers.LimitSwitch,
+            controllers.HomeSwitch,
+            controllers.SingleGPIO,
+            controllers.PushButton,
+            controllers.PWMChannel,
+            controllers.S42CStepperMotor,
+            controllers.FS5103RContinuousMotor,
+            controllers.GeneralPWMServo,
+        ]
+
+        self.assertTrue(getattr(controllers.BaseController.safe_stop, "__isabstractmethod__"))
+        for controller_type in controller_types:
+            self.assertIn("safe_stop", controller_type.__dict__)
+            self.assertFalse(controller_type.__abstractmethods__)
+
     def test_i2c_dc_motor_stops_throttle(self):
         controller = object.__new__(controllers.DCMotorI2C)
         controller.device = mock.Mock()

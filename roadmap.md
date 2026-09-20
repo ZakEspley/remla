@@ -8,6 +8,7 @@
 - FIFO applies to waiting control users, not to every command. Commands in the same named lock group are serialized; commands without a lock group are permitted to run concurrently, subject to operation limits and hardware safety rules. There is no global command queue.
 - After an owner disconnects, the next FIFO user may be promoted to a handoff-pending state only after outgoing work is terminal. They must choose reset or continue before normal command admission. An unanswered handoff request times out to reset.
 - A timed-out operation must not trigger an automatic reset. It enters a faulted, operator-intervention state that admits no commands. A future local recovery command must invoke a device-specific safe-stop/recovery hook and may reopen admission only after the operation is terminal; its name and authorization are design work.
+- `reset()` returns a device to its configured baseline and may move it. `safe_stop()` must be idempotent and must not initiate baseline movement; it is required for every controller, including an explicit no-op for sensor-only controllers. Graceful shutdown drains work, then resets and safe-stops; fault shutdown safe-stops without reset.
 
 ## Completed discovery
 - [x] Built the repository knowledge graph in `graphify-out/`.
@@ -20,7 +21,7 @@
 - `runDeviceMethod()` tracks every device command and applies optional lock-group serialization. Handoff resets and shutdown cancel queued operations, drain scheduler work, and acquire every configured scheduler lock; timeout/reset faults block admission and emit a legacy fault event, while structured state publication and fault recovery remain unfinished.
 - After runtime initialization, foreground SIGINT/SIGTERM request coordinator shutdown. Foreground startup failure invokes coordinator teardown before PID removal; service/CLI stop still use separate paths.
 - `stop()` stops the systemd service and may signal a foreground PID, but does not use one shared teardown contract.
-- The shutdown controller contract now calls `safe_stop()` after reset. DC motor, continuous-motor, servo, and PiCamera2MultiCam implementations stop/disable their outputs or close camera resources; remaining controllers require classification and audit.
+- Every controller now explicitly implements abstract `safe_stop()`. DC/stepper/continuous motors, servos, GPIO outputs, PWM, multiplexers, plugs/PDUs, and cameras have output-specific behavior; measurement and switch-only controllers explicitly declare no physical stop. Hardware validation of the resulting safe states remains required.
 - The IPC listener is closed and unlinked by coordinator shutdown but still accepts only ad-hoc text notifications.
 - `init()` can still duplicate the per-boot camera cycle; see `UPDATE_PLAN.md`.
 
@@ -100,9 +101,9 @@
 **Tests:** FIFO user promotion into handoff-pending state; inactive-user rejection; same-lock serialization; independent-lock and ungrouped-command concurrency; outstanding-operation limit; active-user disconnect before lock acquisition; disconnect during execution; handoff continue/reset and automatic reset timeout; reset failure; timeout followed by a same-lock command while executor work remains active; command timeout freezes admission without automatic reset; camera progress correlation.
 
 ### 4. Implement unified shutdown and controller safety audit
-- [ ] Coordinator teardown enters `stopping`, cancels queued operations, drains active scheduler work, resets devices behind a barrier, closes WebSocket/IPC resources, and shuts down the executor. Add dependency ordering, persistence, hardware-resource release, PID cleanup, and reset-error aggregation.
+- [ ] Coordinator teardown enters `stopping`, cancels queued operations, drains active scheduler work, resets devices behind a barrier, closes WebSocket/IPC resources, and shuts down the executor. It safe-stops all devices even if reset fails and reports combined reset/stop failures. Add dependency ordering, persistence, hardware-resource release, and PID cleanup.
 - [ ] Route foreground signals and startup failure through coordinator shutdown. Route systemd termination, CLI stop, and explicit reset through the same sequence with their stated reset reason.
-- [ ] Add `safe_stop()` to the controller contract and invoke it after coordinator reset. DC motor, continuous-motor, servo, and PiCamera2MultiCam paths are covered; audit remaining controller resets, classify sensor-only controllers, and add close/release where reset is not sufficient.
+- [ ] `safe_stop()` is abstract and explicitly implemented by every controller. Graceful coordinator shutdown resets then safe-stops; fault shutdown safe-stops without reset. Hardware-validate each declared safe state and add controller-specific recovery where a stop does not establish a known state.
 - [ ] Remove direct `exit()`, `os._exit()`, and independent cleanup paths that bypass the coordinator.
 
 **Tests:** Ctrl+C while idle; Ctrl+C during a blocking command; SIGTERM during reset; repeated signals; startup failure after partial device creation; reset exception aggregation; exactly-once PID/socket cleanup; executor shutdown.

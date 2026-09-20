@@ -437,7 +437,6 @@ class Experiment(object):
             )
         except asyncio.TimeoutError:
             await self.enter_fault(f"Operation timed out: {deviceName}/{cmd}")
-            await self.cancel_queued_operations()
             await self.sendAlert(
                 websocket, f"Experiment/operationTimedOut/{deviceName}/{cmd}"
             )
@@ -448,6 +447,13 @@ class Experiment(object):
     async def enter_fault(self, message):
         self._runtime_state = "faulted"
         self.last_fault = message
+        await self.cancel_queued_operations()
+        if self.executor is not None:
+            loop = asyncio.get_running_loop()
+            try:
+                await loop.run_in_executor(self.executor, self.safeStopExperiment)
+            except Exception as error:
+                logging.error("Safe stop failed while entering fault: %s", error)
         await self.sendCommandToAllClients(f"fault/{message}")
 
     async def runDeviceMethod(self, deviceName, method, params, websocket):
@@ -679,15 +685,18 @@ class Experiment(object):
                 return
 
             logging.info("Shutting down experiment: %s", reason)
+            fault_shutdown = self._runtime_state == "faulted" or reason == "fault"
             self._runtime_state = "stopping"
             self.cancel_handoff_timeout()
             shutdown_error = None
             try:
                 await self.cancel_queued_operations()
-                await self.command_scheduler.wait_for_idle()
                 loop = asyncio.get_running_loop()
-                async with self.command_scheduler.reset_barrier():
-                    if self.executor is not None:
+                if fault_shutdown and self.executor is not None:
+                    await loop.run_in_executor(self.executor, self.safeStopExperiment)
+                await self.command_scheduler.wait_for_idle()
+                if not fault_shutdown and self.executor is not None:
+                    async with self.command_scheduler.reset_barrier():
                         await loop.run_in_executor(self.executor, self.shutdownExperiment)
             except BaseException as error:
                 shutdown_error = error
@@ -729,7 +738,31 @@ class Experiment(object):
         logging.info("Experiment reset complete.")
 
     def shutdownExperiment(self):
-        self.resetExperiment()
+        reset_error = None
+        try:
+            self.resetExperiment()
+        except Exception as error:
+            reset_error = error
+
+        try:
+            self.safeStopExperiment()
+        except Exception as safe_stop_error:
+            if reset_error is not None:
+                raise RuntimeError(
+                    f"Reset failed: {reset_error}; safe stop failed: {safe_stop_error}"
+                ) from reset_error
+            raise
+
+        if reset_error is not None:
+            raise reset_error
+
+    def safeStopExperiment(self):
+        errors = []
         for deviceName, device in self.devices.items():
             logging.info(f"Safely stopping device {deviceName}")
-            device.safe_stop()
+            try:
+                device.safe_stop()
+            except Exception as error:
+                errors.append(f"{deviceName}: {error}")
+        if errors:
+            raise RuntimeError("Safe stop failed for " + "; ".join(errors))
