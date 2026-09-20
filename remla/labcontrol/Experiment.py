@@ -6,7 +6,7 @@ import socket
 import threading
 import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import quote
@@ -456,6 +456,32 @@ class Experiment(object):
                 logging.error("Safe stop failed while entering fault: %s", error)
         await self.sendCommandToAllClients(f"fault/{message}")
 
+    async def recover_from_fault(self, action):
+        if self._runtime_state != "faulted":
+            return {"ok": False, "error": "not_faulted"}
+        if self.command_scheduler.has_running_commands():
+            return {"ok": False, "error": "operations_running"}
+        if action == "resume":
+            self._runtime_state = "ready"
+            return {"ok": True, "state": "ready"}
+        if action == "reset":
+            self._runtime_state = "resetting"
+            try:
+                await self.cancel_queued_operations()
+                loop = asyncio.get_running_loop()
+                async with self.command_scheduler.reset_barrier():
+                    if self.executor is not None:
+                        await loop.run_in_executor(self.executor, self.resetExperiment)
+            except Exception as error:
+                await self.enter_fault(f"Recovery reset failed: {error}")
+                return {"ok": False, "error": "reset_failed"}
+            self._runtime_state = "ready"
+            return {"ok": True, "state": "ready"}
+        if action == "shutdown":
+            await self.shutdown("fault")
+            return {"ok": True, "state": "stopped"}
+        return {"ok": False, "error": "invalid_action"}
+
     async def runDeviceMethod(self, deviceName, method, params, websocket):
         if not self.can_accept_commands(websocket):
             raise CommandAdmissionError("experiment is not accepting commands")
@@ -637,16 +663,20 @@ class Experiment(object):
                 except (OSError, socket.timeout):
                     conn.close()
                     continue
-                if data in ["boot", "contact"]:
-                    # Send message to active client
-                    if self.activeClient:
-                        future = asyncio.run_coroutine_threadsafe(
-                            self.sendAlert(self.activeClient, f"Experiment/message/{data}"),
-                            loop
-                        )
-                        print(f"Sent {data} message to active client.")
-                    else:
-                        print(f"No active client to send {data} message.")
+                future = asyncio.run_coroutine_threadsafe(
+                    self.handle_ipc_command(data), loop
+                )
+                try:
+                    result = future.result(timeout=30)
+                except FutureTimeout:
+                    result = {"ok": False, "error": "request_timeout"}
+                except Exception as error:
+                    logging.exception("IPC command failed")
+                    result = {"ok": False, "error": str(error)}
+                try:
+                    conn.sendall(json.dumps(result).encode())
+                except OSError:
+                    pass
                 conn.close()
 
 
@@ -665,6 +695,17 @@ class Experiment(object):
             ipc_sock.close()
             raise
         return ipc_sock, ipc_thread
+
+    async def handle_ipc_command(self, command):
+        if command.startswith("recover/"):
+            _, action = command.split("/", 1)
+            return await self.recover_from_fault(action)
+        if command in {"boot", "contact"}:
+            if self.activeClient is not None:
+                await self.sendAlert(self.activeClient, f"Experiment/message/{command}")
+                return {"ok": True}
+            return {"ok": False, "error": "no_active_client"}
+        return {"ok": False, "error": "unknown_command"}
 
     def request_shutdown(self, reason):
         loop = self.loop
@@ -725,7 +766,8 @@ class Experiment(object):
             self.ipc_socket.close()
             self.ipc_socket = None
         if self.ipc_thread is not None:
-            self.ipc_thread.join(timeout=1)
+            if self.ipc_thread is not threading.current_thread():
+                self.ipc_thread.join(timeout=1)
             self.ipc_thread = None
         if self.ipc_path is not None:
             self.ipc_path.unlink(missing_ok=True)

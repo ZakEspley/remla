@@ -98,6 +98,9 @@ class CommandScheduler:
         if tasks:
             await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
 
+    def has_running_commands(self):
+        return bool(self._running_commands)
+
     @asynccontextmanager
     async def reset_barrier(self):
         locks = [self._lock_groups[name] for name in sorted(self._lock_groups)]

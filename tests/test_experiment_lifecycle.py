@@ -870,6 +870,65 @@ class ExperimentFaultTests(unittest.IsolatedAsyncioTestCase):
             "fault/Operation timed out: camera/capture"
         )
 
+    async def test_cli_recovery_can_resume_after_fault(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        experiment._runtime_state = "faulted"
+
+        result = await experiment.recover_from_fault("resume")
+
+        self.assertEqual(result, {"ok": True, "state": "ready"})
+        self.assertEqual(experiment._runtime_state, "ready")
+
+    async def test_cli_recovery_reset_restores_baseline_before_resuming(self):
+        class Device:
+            name = "camera"
+
+            def __init__(self):
+                self.reset_called = False
+
+            def reset(self):
+                self.reset_called = True
+
+            def safe_stop(self):
+                pass
+
+        experiment = experiment_module.Experiment("RemoteLabs")
+        device = Device()
+        experiment.addDevice(device)
+        experiment._runtime_state = "faulted"
+        experiment.executor = mock.Mock()
+        loop = mock.Mock()
+
+        async def run_in_executor(executor, function, *args):
+            return function(*args)
+
+        loop.run_in_executor = mock.AsyncMock(side_effect=run_in_executor)
+        with mock.patch.object(
+            experiment_module.asyncio, "get_running_loop", return_value=loop
+        ):
+            result = await experiment.recover_from_fault("reset")
+
+        self.assertEqual(result, {"ok": True, "state": "ready"})
+        self.assertTrue(device.reset_called)
+
+    async def test_cli_recovery_refuses_while_work_is_running(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        experiment._runtime_state = "faulted"
+        experiment.command_scheduler.has_running_commands = mock.Mock(return_value=True)
+
+        result = await experiment.recover_from_fault("resume")
+
+        self.assertEqual(result, {"ok": False, "error": "operations_running"})
+        self.assertEqual(experiment._runtime_state, "faulted")
+
+    async def test_ipc_recovery_routes_the_selected_action(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        experiment._runtime_state = "faulted"
+
+        result = await experiment.handle_ipc_command("recover/resume")
+
+        self.assertEqual(result, {"ok": True, "state": "ready"})
+
 
 if __name__ == "__main__":
     unittest.main()

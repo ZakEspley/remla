@@ -14,6 +14,7 @@
 - Named lock-group scheduling lives in remla/command_scheduler.py. `Experiment.runDeviceMethod()` registers each command and delegates its optional lock-group serialization to this scheduler; devices with no mapping are currently intentionally ungrouped. Timed-out grouped commands retain their scheduler lock until their command coroutine finishes; timeout faults block admission and send a legacy fault event. A pending handoff has a 60-second timer; handoff reset and `Experiment.shutdown()` cancel queued operations, drain scheduler work, and acquire a reset barrier. Every controller must explicitly implement abstract `safe_stop()`: `reset()` may return to baseline, while `safe_stop()` must not initiate baseline movement. Graceful shutdown resets then safe-stops; fault shutdown only safe-stops. Prefer `request_shutdown()` for signal-driven teardown; foreground startup failure uses coordinator teardown, while service-mode teardown and hardware validation remain unfinished.
 - Persisted state is diagnostic only at startup; a lab name/hash mismatch is preserved and requires explicit operator archive/discard or configuration restoration.
 - WebSocket server logic lives in remla/labcontrol/Experiment.py.
+- `docs/protocol.md` defines the version 1 JSON event schema only; live WebSocket frames remain legacy text until an explicit migration.
 - Paths and system locations are centralized in remla/settings.py.
 
 ## Agent rules from editors
@@ -129,6 +130,7 @@
 - Start background service: `poetry run remla run`
 - Stop service: `poetry run remla stop`
 - Service status: `poetry run remla status`
+- Recover a faulted running service: `poetry run remla recover`
 
 ## Safety checks for agents
 - Do not modify `/etc`, `/boot`, or systemd files unless explicitly asked.

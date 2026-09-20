@@ -2,9 +2,23 @@ import subprocess
 import sys
 import textwrap
 import unittest
+from unittest import mock
 
 
 class RuntimeImportTests(unittest.TestCase):
+    def test_recovery_ipc_client_returns_service_result(self):
+        from remla import main
+
+        socket_factory = mock.MagicMock()
+        socket_client = socket_factory.return_value.__enter__.return_value
+        socket_client.recv.return_value = b'{"ok": true, "state": "ready"}'
+
+        with mock.patch.object(main.socket, "socket", socket_factory):
+            result = main._send_ipc_command("recover/reset")
+
+        self.assertEqual(result, {"ok": True, "state": "ready"})
+        socket_client.sendall.assert_called_once_with(b"recover/reset")
+
     def test_main_imports_without_raspberry_pi_hardware(self):
         result = subprocess.run(
             [sys.executable, "-c", "import remla.main"],

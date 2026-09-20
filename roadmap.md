@@ -92,7 +92,7 @@
 - [x] Add hardware-free FIFO ownership and operation lifecycle models. They track handoff-pending/resetting ownership, operation IDs, optional lock groups, outstanding limits, and terminal outcomes.
 - [x] Add a hardware-free scheduler that serializes async commands by named lock group while allowing ungrouped commands to run concurrently. `Experiment.runDeviceMethod()` now submits each accepted device command to this scheduler and records its terminal outcome.
 - [ ] Replace `handleConnection()` task creation and `onClientDisconnect()` with one FIFO ownership manager. Legacy disconnect handling is removed; handoff choices validate the pending user; owner loss cancels queued work and drains scheduler-tracked work before promotion; an unanswered 60-second handoff requests reset. Publish transition events.
-- [ ] Command execution registers operations with optional lock groups, reports outstanding-limit/time-out rejection, retains named locks until timed-out command work ends, and cancels queued operations before handoff reset. Timeout faults now fence admission and emit a legacy event; publish structured ownership/operation/reset transitions and add authorized fault recovery.
+- [ ] Command execution registers operations with optional lock groups, reports outstanding-limit/time-out rejection, retains named locks until timed-out command work ends, and cancels queued operations before handoff reset. Timeout faults fence admission and emit a legacy event. Local CLI recovery now offers reset, resume, or fault shutdown through Unix IPC; publish structured ownership/operation/reset transitions.
 - [ ] Convert the existing lock mapping into startup validation. Fail before serving if any command-capable device lacks explicit scheduling metadata, including an intentional no-lock-group declaration.
 - [ ] Route camera-switch progress through operation IDs and state events rather than separate uncorrelated command strings.
 - [ ] Add outstanding-operation limits, timeout, cancellation, and terminal-result handling without introducing a global command queue.
@@ -109,7 +109,7 @@
 **Tests:** Ctrl+C while idle; Ctrl+C during a blocking command; SIGTERM during reset; repeated signals; startup failure after partial device creation; reset exception aggregation; exactly-once PID/socket cleanup; executor shutdown.
 
 ### 5. Migrate control and IPC messages to JSON
-- [ ] Specify and document versioned JSON messages for `state.snapshot`, `state.changed`, `operation.queued`, `operation.started`, `operation.completed`, `operation.failed`, `reset.started`, `reset.completed`, and `fault`.
+- [x] Specify version 1 JSON event envelopes and payloads in `docs/protocol.md` for `state.snapshot`, `state.changed`, `operation.queued`, `operation.started`, `operation.completed`, `operation.failed`, `reset.started`, `reset.completed`, and `fault`. Live WebSocket delivery remains legacy-only.
 - [ ] Include operation ID and lifecycle state in every result, error, and camera event.
 - [ ] Support legacy slash-delimited requests/responses per connection during the agreed compatibility window; never mix legacy and JSON frames on one connection.
 - [ ] Update the maintained browser WebSocket client to render control-owner/waiting-user status, current operations, reset/fault status, and reconnect state. Remove duplicate/stale socket client assets, including the tracked conflict-marker file.

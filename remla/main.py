@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import json
 import os
 import re
 import shutil
@@ -1126,6 +1127,39 @@ def contact():
         print("Contact command sent to server.")
     except Exception as e:
         print(f"Failed to send contact command: {e}")
+
+
+def _send_ipc_command(command, ipc_path="/tmp/remla_cmd.sock"):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(30)
+        sock.connect(ipc_path)
+        sock.sendall(command.encode())
+        response = sock.recv(4096)
+    if not response:
+        raise RuntimeError("The ReMLA service did not return an IPC response")
+    return json.loads(response.decode())
+
+
+@app.command()
+def recover():
+    """Interactively recover a faulted running ReMLA service."""
+    action = typer.prompt(
+        "Recovery action (reset, resume, shutdown)", default="reset"
+    ).strip().lower()
+    if action not in {"reset", "resume", "shutdown"}:
+        alert("Recovery action must be reset, resume, or shutdown.")
+        raise typer.Abort()
+    if not typer.confirm(f"Send fault recovery action '{action}' to the running service?"):
+        raise typer.Abort()
+    try:
+        result = _send_ipc_command(f"recover/{action}")
+    except (OSError, RuntimeError, json.JSONDecodeError) as error:
+        alert(f"Recovery request failed: {error}")
+        raise typer.Abort()
+    if not result.get("ok"):
+        alert(f"Recovery was rejected: {result.get('error', 'unknown_error')}")
+        raise typer.Abort()
+    success(f"Recovery action completed; service state is {result['state']}.")
 
 
 
