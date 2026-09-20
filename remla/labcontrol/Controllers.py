@@ -126,6 +126,9 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
     def reset(self):
         pass
 
+    def safe_stop(self):
+        return None
+
     def getState(self):
         return self.state
 
@@ -318,7 +321,10 @@ class DCMotorI2C(MotorKit, BaseController):
         pass
 
     def reset(self):
-        pass
+        self.safe_stop()
+
+    def safe_stop(self):
+        self.throttle(0)
 
     def throttle(self, speed):
         self.device.throttle = speed
@@ -1409,7 +1415,11 @@ class PololuDCMotor(BaseController):
         return speed
 
     def reset(self):
-        pass
+        self.safe_stop()
+
+    def safe_stop(self):
+        self.throttle(0)
+        pi.write(self.notEnablePin, 1)
 
 
 class ArduCamMultiCamera(BaseController):
@@ -2419,6 +2429,9 @@ class PiCamera2MultiCam(BaseController):
                 self._camera_allocator.dmaHeap.close()
             self._camera_allocator = None
 
+    def safe_stop(self):
+        self.close()
+
 
 class ElectronicScreen(BaseController):
     deviceType = "controller"
@@ -2967,7 +2980,10 @@ class FS5103RContinuousMotor(BaseController):
         return throttle
 
     def reset(self):
-        pass
+        self.safe_stop()
+
+    def safe_stop(self):
+        self.disable()
 
 
 class GeneralPWMServo(BaseController):
@@ -3033,7 +3049,10 @@ class GeneralPWMServo(BaseController):
         return self.state
 
     def reset(self):
-        pass
+        self.safe_stop()
+
+    def safe_stop(self):
+        self.disable()
 
 
 class CommandError(Exception):

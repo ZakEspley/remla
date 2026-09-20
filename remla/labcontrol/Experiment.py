@@ -688,7 +688,7 @@ class Experiment(object):
                 loop = asyncio.get_running_loop()
                 async with self.command_scheduler.reset_barrier():
                     if self.executor is not None:
-                        await loop.run_in_executor(self.executor, self.resetExperiment)
+                        await loop.run_in_executor(self.executor, self.shutdownExperiment)
             except BaseException as error:
                 shutdown_error = error
                 self.last_fault = f"Shutdown failed: {error}"
@@ -727,3 +727,9 @@ class Experiment(object):
             logging.info(f"Resetting device {deviceName}")
             device.reset()
         logging.info("Experiment reset complete.")
+
+    def shutdownExperiment(self):
+        self.resetExperiment()
+        for deviceName, device in self.devices.items():
+            logging.info(f"Safely stopping device {deviceName}")
+            device.safe_stop()

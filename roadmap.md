@@ -20,7 +20,7 @@
 - `runDeviceMethod()` tracks every device command and applies optional lock-group serialization. Handoff resets and shutdown cancel queued operations, drain scheduler work, and acquire every configured scheduler lock; timeout/reset faults block admission and emit a legacy fault event, while structured state publication and fault recovery remain unfinished.
 - After runtime initialization, foreground SIGINT/SIGTERM request coordinator shutdown. Foreground startup failure invokes coordinator teardown before PID removal; service/CLI stop still use separate paths.
 - `stop()` stops the systemd service and may signal a foreground PID, but does not use one shared teardown contract.
-- Several controller `reset()` methods are no-ops, while `PiCamera2MultiCam.close()` has cleanup that runtime shutdown does not call.
+- The shutdown controller contract now calls `safe_stop()` after reset. DC motor, continuous-motor, servo, and PiCamera2MultiCam implementations stop/disable their outputs or close camera resources; remaining controllers require classification and audit.
 - The IPC listener is closed and unlinked by coordinator shutdown but still accepts only ad-hoc text notifications.
 - `init()` can still duplicate the per-boot camera cycle; see `UPDATE_PLAN.md`.
 
@@ -102,8 +102,7 @@
 ### 4. Implement unified shutdown and controller safety audit
 - [ ] Coordinator teardown enters `stopping`, cancels queued operations, drains active scheduler work, resets devices behind a barrier, closes WebSocket/IPC resources, and shuts down the executor. Add dependency ordering, persistence, hardware-resource release, PID cleanup, and reset-error aggregation.
 - [ ] Route foreground signals and startup failure through coordinator shutdown. Route systemd termination, CLI stop, and explicit reset through the same sequence with their stated reset reason.
-- [ ] Audit every controller reset at the locations reported above. Replace no-op actuator resets with safe outputs; classify sensor-only controllers explicitly; add close/release where reset is not sufficient.
-- [ ] Integrate `PiCamera2MultiCam.close()` and any equivalent ArduCam cleanup into the controller contract.
+- [ ] Add `safe_stop()` to the controller contract and invoke it after coordinator reset. DC motor, continuous-motor, servo, and PiCamera2MultiCam paths are covered; audit remaining controller resets, classify sensor-only controllers, and add close/release where reset is not sufficient.
 - [ ] Remove direct `exit()`, `os._exit()`, and independent cleanup paths that bypass the coordinator.
 
 **Tests:** Ctrl+C while idle; Ctrl+C during a blocking command; SIGTERM during reset; repeated signals; startup failure after partial device creation; reset exception aggregation; exactly-once PID/socket cleanup; executor shutdown.

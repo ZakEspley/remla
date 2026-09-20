@@ -711,9 +711,13 @@ class ExperimentShutdownTests(unittest.IsolatedAsyncioTestCase):
 
             def __init__(self):
                 self.reset_called = False
+                self.safe_stop_called = False
 
             def reset(self):
                 self.reset_called = True
+
+            def safe_stop(self):
+                self.safe_stop_called = True
 
         experiment = experiment_module.Experiment("RemoteLabs")
         device = Device()
@@ -742,9 +746,10 @@ class ExperimentShutdownTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(experiment.ipc_path.exists())
 
         self.assertTrue(device.reset_called)
+        self.assertTrue(device.safe_stop_called)
         self.assertEqual(experiment._runtime_state, "stopped")
         loop.run_in_executor.assert_awaited_once_with(
-            experiment.executor, experiment.resetExperiment
+            experiment.executor, experiment.shutdownExperiment
         )
         ipc_socket.close.assert_called_once_with()
         ipc_thread.join.assert_called_once_with(timeout=1)
