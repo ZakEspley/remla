@@ -3,7 +3,7 @@
 ## Scope and confirmed decisions
 - This is the implementation plan for reliable runtime state, controlled resets, shutdown, and command scheduling. Versioned state diagnostics, operation models, scheduler fencing, FIFO handoff, and initial coordinator teardown are implemented; controller audit, state publication, recovery, and full shutdown coverage remain.
 - Initial deployments permit anonymous control from a trusted network. Keep origin, connection, rate, command-validation, and physical safety controls; do not add user authentication in this work.
-- Production installation should ultimately use an unprivileged `remla` service account and a stable UV-managed runtime location. Provisioning remains a separate concern from runtime behavior.
+- Production installation uses an unprivileged `remla` service account and versioned `/opt/remla/releases` runtimes. `scripts/install.sh` is the Pi-only provisioning boundary; it installs verified GitHub-release assets, initializes the lab as part of the one privileged run, and exposes normal operator commands without `sudo`.
 - `UPDATE_PLAN.md` remains authoritative for the camera-cycle requirement. The camera work below must preserve: cycle only in `remla run`, exactly once per boot, and restart MediaMTX per channel.
 - FIFO applies to waiting control users, not to every command. Every device belongs to exactly one named lock group; commands in the same group are serialized and commands in different groups may run concurrently. There is no global command queue.
 - After an owner disconnects, the next FIFO user may be promoted to a handoff-pending state only after outgoing work is terminal. They must choose reset or continue before normal command admission. An unanswered handoff request times out to reset.
@@ -121,10 +121,11 @@ Current coverage verifies repeated shutdown requests share one future, foregroun
 ### 6. Apply camera-cycle plan and deployment boundaries
 - [x] Complete `UPDATE_PLAN.md`: cycling is removed from `init()`, the boot guard remains only in `run()`, and camera-cycle documentation reflects MediaMTX-only restarts.
 - [ ] Verify that cycle/reset/shutdown ordering does not restart or interrupt MediaMTX unexpectedly.
-- [ ] Define runtime service permissions so normal users operate the website without `sudo`; retain privileged actions only in installation/provisioning.
-- [ ] After runtime behavior is covered, migrate packaging from Poetry to PEP 621 + UV and define the installer/service layout separately from application code.
+- [x] Define a dedicated `remla` systemd service account, versioned `/opt/remla` runtime, shared configuration/lab locations, operator group, group-writable IPC socket, and narrow Polkit rule for `remla.service`. Validate the rule and service ownership on Raspberry Pi OS before treating it as an access-control boundary.
+- [x] Migrate packaging from Poetry to PEP 621 + UV. GitHub tag releases build a wheel, hash-locked requirements, installer, service, and policy assets; the installer verifies release checksums and installs the wheel without requiring UV or pipx on the Pi.
+- [ ] Publish the first stable `v0.4.0` GitHub Release and validate its installer from a clean Raspberry Pi OS image. Add signed release provenance; until then the convenience installer explicitly relies on GitHub Release integrity and its checksums only detect transfer or asset corruption.
 
-**Hardware verification:** reboot and confirm one camera cycle; disconnect an active browser during motor/camera use; Ctrl+C from `remla run -f`; `systemctl stop remla`; camera cleanup/restart; physical actuator safe state; reconnect after reset; service restart after fault.
+**Hardware verification:** clean-image installer; interactive camera setup; reboot and confirm one camera cycle; unprivileged `remla status/start/stop/recover/upgrade`; disconnect an active browser during motor/camera use; Ctrl+C from `remla run -f`; `systemctl stop remla`; camera cleanup/restart; physical actuator safe state; reconnect after reset; service restart after fault.
 
 ## Deferred work
 - [ ] Add deterministic multi-lock acquisition only if a future command must reserve more than one lock group; preserve lock ordering and dedicated concurrency tests.

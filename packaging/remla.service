@@ -1,0 +1,24 @@
+[Unit]
+Description=ReMLA laboratory controller
+After=network-online.target pigpiod.service mediamtx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=remla
+Group=remla
+SupplementaryGroups=gpio i2c remlausers
+WorkingDirectory=/var/lib/remla
+Environment=REMLA_CONFIG_HOME=/etc
+Environment=REMLA_LABS_DIRECTORY=/var/lib/remla/labs
+Environment=REMLA_IPC_SOCKET=/run/remla_cmd.sock
+Environment=REMLA_OPERATOR_GROUP=remlausers
+ExecStart=/opt/remla/current/bin/remla run --foreground
+Restart=always
+RestartSec=5
+TimeoutStopSec=90
+RuntimeDirectory=remla
+RuntimeDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

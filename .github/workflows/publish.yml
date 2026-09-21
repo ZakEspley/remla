@@ -1,45 +1,70 @@
+name: Publish ReMLA release
+
 on:
   push:
     tags:
-      - "*.*.*"
-      - "*.*.*.dev*"
-      - "*.*.*.post*"
+      - "v*.*.*"
+
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  pypi-publish:
-    name: Upload release to PyPI
+  release:
+    if: "!contains(github.ref_name, '.dev')"
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/remla/
-    permissions:
-      id-token: write
     steps:
-      - name: Checkout code
+      - name: Check out release tag
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Set up UV
+        uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.11"
+          version: "0.12.5"
 
-      - name: Install Poetry
+      - name: Verify locked dependencies
+        run: uv sync --locked
+
+      - name: Verify release version
         run: |
-          curl -sSL https://install.python-poetry.org | python - -y
+          tag_version="${GITHUB_REF_NAME#v}"
+          package_version="$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          test "$tag_version" = "$package_version"
 
-      - name: Update PATH
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Build release artifacts
+        run: |
+          uv build
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt --output-file dist/requirements.txt
+          cp scripts/install.sh dist/install.sh
+          cp packaging/remla.service dist/remla.service
+          cp packaging/49-remla.rules dist/49-remla.rules
+          (cd dist && sha256sum remla-*.whl requirements.txt remla.service 49-remla.rules > SHA256SUMS)
 
-      - name: Update Poetry configuration
-        run: poetry config virtualenvs.create false
+      - name: Run hardware-free tests
+        run: >-
+          uv run python -m unittest
+          tests.test_runtime_imports
+          tests.test_experiment_lifecycle
+          tests.test_boot_status
+          tests.test_camera_cycle
+          tests.test_runtime_state
+          tests.test_runtime_operations
+          tests.test_command_scheduler
+          tests.test_mediamtx
+          tests.test_mediamtx_camera
+          tests.test_device_config
+          tests.test_controller_safety
+          tests.test_installation
+          tests.test_release
 
-      - name: Install dependencies
-        run: poetry install --sync --no-interaction
-
-      - name: Package project
-        run: poetry build
-
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/remla-*.whl
+            dist/remla-*.tar.gz
+            dist/install.sh
+            dist/requirements.txt
+            dist/remla.service
+            dist/49-remla.rules
+            dist/SHA256SUMS

@@ -1,0 +1,7 @@
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "remla.service" &&
+        subject.isInGroup("remlausers")) {
+        return polkit.Result.YES;
+    }
+});

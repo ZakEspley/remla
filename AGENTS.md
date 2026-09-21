@@ -22,11 +22,12 @@
 - No Cursor rules found (.cursor/rules/ or .cursorrules).
 - No Copilot instructions found (.github/copilot-instructions.md).
 
-## Build / install (Poetry)
+## Build / install (UV)
 - Python: 3.11 (see pyproject.toml).
-- Install deps: `poetry install --sync --no-interaction`
-- Build package: `poetry build`
-- Run CLI: `poetry run remla --help`
+- Sync dependencies: `uv sync`
+- Build package: `uv build`
+- Run CLI: `uv run remla --help`
+- Stable Pi releases are published to GitHub Releases. `scripts/install.sh` installs a release into `/opt/remla`; `packaging/remla.service` runs its stable `/opt/remla/current` symlink as the `remla` service account. Do not run this installer on a development workstation except with `--dry-run`.
 
 ## Lint / format
 - No lint or formatter configuration is present in this repo.
@@ -34,9 +35,9 @@
 
 ## Tests
 - Tests use the standard-library `unittest` runner.
-- Run the hardware-free suite: `poetry run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety`
+- Run the hardware-free suite: `uv run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety tests.test_installation tests.test_release`
 - `tests.test_boot_status` covers the camera-cycle boot marker using temporary files and a mocked boot timestamp.
-- Run one unit test: `poetry run python -m unittest tests.test_runtime_imports` (no pytest suite configured).
+- Run one unit test: `uv run python -m unittest tests.test_runtime_imports` (no pytest suite configured).
 - If you add a real test framework, update this section with exact commands.
 
 ## Runtime and system notes
@@ -105,7 +106,7 @@
 - The server runs in `Experiment.startServer()` with asyncio and websockets.
 - Use `ThreadPoolExecutor` for hardware calls to avoid blocking the loop.
 - Messages use prefixes: `MESSAGE:`, `ALERT:`, `COMMAND:`.
-- Keep IPC socket path `/tmp/remla_cmd.sock` consistent.
+- IPC socket path is centralized as `ipcSocketPath`. Installed services use `/run/remla_cmd.sock`, owned by the `remlausers` group; local development retains the `/tmp/remla_cmd.sock` default.
 
 ## Hardware and GPIO
 - `pigpio` is primary for GPIO; `RPi.GPIO` is fallback in some helpers.
@@ -126,12 +127,12 @@
 - Scheduler tests: `tests/test_command_scheduler.py`
 
 ## Common tasks
-- Show config path: `poetry run remla showconfig`
-- Start service foreground: `poetry run remla run -f`
-- Start background service: `poetry run remla run`
-- Stop service: `poetry run remla stop`
-- Service status: `poetry run remla status`
-- Recover a faulted running service: `poetry run remla recover`
+- Show config path: `uv run remla showconfig`
+- Start service foreground: `uv run remla run -f`
+- Start background service: `uv run remla run`
+- Stop service: `uv run remla stop`
+- Service status: `uv run remla status`
+- Recover a faulted running service: `uv run remla recover`
 
 ## Safety checks for agents
 - Do not modify `/etc`, `/boot`, or systemd files unless explicitly asked.

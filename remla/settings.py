@@ -11,9 +11,10 @@ sudo_uid = os.environ.get("SUDO_UID")
 callingUid = int(sudo_uid) if sudo_uid is not None else os.getuid()
 homeDirectory = Path(pwd.getpwuid(callingUid).pw_dir)
 if sudo_uid is not None:
-    configDirectory = homeDirectory / ".config"
+    defaultConfigDirectory = homeDirectory / ".config"
 else:
-    configDirectory = Path(os.environ.get("XDG_CONFIG_HOME", homeDirectory / ".config"))
+    defaultConfigDirectory = Path(os.environ.get("XDG_CONFIG_HOME", homeDirectory / ".config"))
+configDirectory = Path(os.environ.get("REMLA_CONFIG_HOME", defaultConfigDirectory))
 
 
 
@@ -24,7 +25,7 @@ mediamtxBinaryLocation = Path("/usr/local/bin")
 baseDir = Path(__file__).parent
 settingsDirectory = configDirectory / APP_NAME
 logsDirectory = settingsDirectory / "logs"
-remoteLabsDirectory = homeDirectory / 'remla'
+remoteLabsDirectory = Path(os.environ.get("REMLA_LABS_DIRECTORY", homeDirectory / "remla"))
 setupDirectory = baseDir / "setup"
 overlayDirectory = baseDir / "overlays"
 remlaCameraMux4PortOverlayName = "remla-camera-mux-4port"
@@ -51,3 +52,5 @@ websiteImgsDirectory = websiteStaticDirectory / "imgs"
 
 runMarker = settingsDirectory / "remla_camera_cycled" 
 runtimeStatePath = settingsDirectory / "runtime-state.json"
+ipcSocketPath = Path(os.environ.get("REMLA_IPC_SOCKET", "/tmp/remla_cmd.sock"))
+ipcSocketGroup = os.environ.get("REMLA_OPERATOR_GROUP")

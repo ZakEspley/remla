@@ -24,6 +24,7 @@ from remla import i2ccmd, setupcmd
 from remla.labcontrol.Controllers import *
 from remla.labcontrol.Experiment import Experiment
 from remla.mediamtx import MediaMTXInstallError, install_latest
+from remla.release import ReleaseError, ReleaseInstaller
 from remla.runtime_state import LabConfigIdentity
 from remla.settings import *
 from remla.systemHelpers import *
@@ -32,7 +33,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.3.10"
+__version__ = "0.4.0.dev0"
 
 
 def version_callback(value: bool):
@@ -316,10 +317,6 @@ def init():
 
     ####### Create an initial settings file #############
     _createSettingsFile()
-    ####### Create a remla.service daemon   #############
-    createServiceFile(echo=True)
-    createRemlaPolicy()
-
     interactivesetup()
     typer.echo("Wrapping up install...")
     subprocess.run(["sudo", "systemctl", "daemon-reload"])
@@ -1051,25 +1048,38 @@ ResultAny=yes
         warning(f"Failed to add user '{user}' to group '{groupName}'.")
 
 
-@app.command()
+@app.command(help="Install a verified stable release and restart the ReMLA service.")
 def upgrade(
-    pipx_home: Annotated[str, typer.Argument()] = "/opt/pipx",
-    pipx_bin: Annotated[str, typer.Argument()] = "/usr/local/bin",
+    version: Annotated[Optional[str], typer.Option(help="Stable version to install.")] = None,
 ):
+    installer = ReleaseInstaller()
+    activated = False
     try:
-        subprocess.run(
-            [
-                "sudo",
-                f"PIPX_HOME={pipx_home}",
-                f"PIPX_BIN={pipx_bin}",
-                "pipx",
-                "upgrade",
-                "remla",
-            ],
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        alert(f"Unable to upgrade do to:\n{e}")
+        installed_version = installer.install(version)
+        activated = True
+        subprocess.run(["systemctl", "restart", "remla.service"], check=True)
+        success(f"ReMLA {installed_version} is installed and restarting.")
+    except (ReleaseError, subprocess.CalledProcessError) as error:
+        if not activated:
+            alert(f"Unable to upgrade ReMLA: {error}")
+            return
+        try:
+            restored_version = installer.rollback()
+            subprocess.run(["systemctl", "restart", "remla.service"], check=True)
+        except (ReleaseError, subprocess.CalledProcessError) as rollback_error:
+            alert(f"Unable to upgrade ReMLA: {error}. Rollback failed: {rollback_error}")
+        else:
+            alert(f"Unable to upgrade ReMLA: {error}. Restored {restored_version}.")
+
+
+@app.command(help="Return to the previous installed ReMLA release and restart the service.")
+def rollback():
+    try:
+        installed_version = ReleaseInstaller().rollback()
+        subprocess.run(["systemctl", "restart", "remla.service"], check=True)
+        success(f"ReMLA {installed_version} is installed and restarting.")
+    except (ReleaseError, subprocess.CalledProcessError) as error:
+        alert(f"Unable to roll back ReMLA: {error}")
 
 
 @app.command()
@@ -1115,7 +1125,7 @@ def testws():
 @app.command()
 def boot():
     """Send 'boot' command to the running remla server via IPC."""
-    ipc_path = "/tmp/remla_cmd.sock"
+    ipc_path = ipcSocketPath
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.connect(ipc_path)
@@ -1127,7 +1137,7 @@ def boot():
 @app.command()
 def contact():
     """Send 'contact' command to the running remla server via IPC."""
-    ipc_path = "/tmp/remla_cmd.sock"
+    ipc_path = ipcSocketPath
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.connect(ipc_path)
@@ -1137,7 +1147,7 @@ def contact():
         print(f"Failed to send contact command: {e}")
 
 
-def _send_ipc_command(command, ipc_path="/tmp/remla_cmd.sock"):
+def _send_ipc_command(command, ipc_path=ipcSocketPath):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(30)
         sock.connect(ipc_path)

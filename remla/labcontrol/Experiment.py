@@ -1,4 +1,5 @@
 import asyncio
+import grp
 import json
 import logging
 import os
@@ -648,7 +649,7 @@ class Experiment(object):
             names.append(deviceName)
         return names
 
-    def startIpcListener(self, ipc_path="/tmp/remla_cmd.sock", loop=None):
+    def startIpcListener(self, ipc_path=ipcSocketPath, loop=None):
         if loop is None:
             loop = self.loop
         if loop is None:
@@ -701,6 +702,10 @@ class Experiment(object):
 
         try:
             ipc_sock.bind(ipc_path)
+            if ipcSocketGroup is not None:
+                group_id = grp.getgrnam(ipcSocketGroup).gr_gid
+                os.chown(ipc_path, -1, group_id)
+                os.chmod(ipc_path, 0o660)
             bound = True
             ipc_sock.listen(1)
             ipc_sock.settimeout(0.25)

@@ -115,7 +115,6 @@ def interactive():
     yaml.dump(labSettings, remoteLabsDirectory/remlaSettings["currentLab"])
 
 def _setup(labSettings:dict)->None:
-    createServiceFile(False)
     networkSettings = labSettings["network"]
     websiteSettings = labSettings["website"]
     updateRemlaNginxConf(networkSettings["port"], networkSettings["domain"], networkSettings["wsPort"])
