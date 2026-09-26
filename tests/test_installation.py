@@ -76,6 +76,13 @@ class PiInstallerTests(unittest.TestCase):
         self.assertIn("dist/requirements.txt", content)
         self.assertIn("dist/SHA256SUMS", content)
 
+    def test_installer_copies_local_assets_before_service_user_installs_them(self):
+        content = INSTALLER.read_text()
+
+        self.assertIn('wheel_asset="$release_directory/$(basename "$WHEEL")"', content)
+        self.assertIn('install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0644 "$WHEEL" "$wheel_asset"', content)
+        self.assertIn('install --no-deps "$wheel_asset"', content)
+
 
 class PackageBuildTests(unittest.TestCase):
     def test_built_wheel_contains_runtime_assets(self):

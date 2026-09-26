@@ -141,12 +141,16 @@ install -d -o "$SERVICE_USER" -g remlausers -m 2775 "$INSTALL_ROOT"
 install -d -o "$SERVICE_USER" -g remlausers -m 2775 "$INSTALL_ROOT/releases"
 release_directory="$INSTALL_ROOT/releases/$VERSION"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$release_directory"
+wheel_asset="$release_directory/$(basename "$WHEEL")"
+install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0644 "$WHEEL" "$wheel_asset"
 runuser -u "$SERVICE_USER" -- python3 -m venv "$release_directory/venv"
 if [[ -n "$REQUIREMENTS" ]]; then
-    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install --require-hashes --no-deps -r "$REQUIREMENTS"
-    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install --no-deps "$WHEEL"
+    requirements_asset="$release_directory/requirements.txt"
+    install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0644 "$REQUIREMENTS" "$requirements_asset"
+    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install --require-hashes --no-deps -r "$requirements_asset"
+    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install --no-deps "$wheel_asset"
 else
-    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install "$WHEEL"
+    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install "$wheel_asset"
 fi
 
 install -d -o "$SERVICE_USER" -g remlausers -m 2770 /var/lib/remla/labs
