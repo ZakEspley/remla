@@ -106,7 +106,7 @@
 - The server runs in `Experiment.startServer()` with asyncio and websockets.
 - Use `ThreadPoolExecutor` for hardware calls to avoid blocking the loop.
 - Messages use prefixes: `MESSAGE:`, `ALERT:`, `COMMAND:`.
-- IPC socket path is centralized as `ipcSocketPath`. Installed services use `/run/remla_cmd.sock`, owned by the `remlausers` group; local development retains the `/tmp/remla_cmd.sock` default.
+- IPC socket path is centralized as `ipcSocketPath`. Installed services use `/run/remla/remla_cmd.sock`, owned by the `remlausers` group; local development retains the `/tmp/remla_cmd.sock` default.
 
 ## Hardware and GPIO
 - `pigpio` is primary for GPIO; `RPi.GPIO` is fallback in some helpers.

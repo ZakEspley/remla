@@ -160,7 +160,7 @@ cat > /usr/local/bin/remla <<'EOF'
 #!/bin/sh
 export REMLA_CONFIG_HOME=/etc
 export REMLA_LABS_DIRECTORY=/var/lib/remla/labs
-export REMLA_IPC_SOCKET=/run/remla_cmd.sock
+export REMLA_IPC_SOCKET=/run/remla/remla_cmd.sock
 export REMLA_OPERATOR_GROUP=remlausers
 exec /opt/remla/current/bin/remla "$@"
 EOF
