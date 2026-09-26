@@ -35,7 +35,7 @@
 
 ## Tests
 - Tests use the standard-library `unittest` runner.
-- Run the hardware-free suite: `uv run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety tests.test_installation tests.test_release`
+- Run the hardware-free suite: `uv run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety tests.test_installation tests.test_release tests.test_workspace`
 - `tests.test_boot_status` covers the camera-cycle boot marker using temporary files and a mocked boot timestamp.
 - Run one unit test: `uv run python -m unittest tests.test_runtime_imports` (no pytest suite configured).
 - If you add a real test framework, update this section with exact commands.
@@ -133,6 +133,7 @@
 - Stop service: `uv run remla stop`
 - Service status: `uv run remla status`
 - Recover a faulted running service: `uv run remla recover`
+- Create a lab workspace link: `uv run remla link [PATH]`
 
 ## Safety checks for agents
 - Do not modify `/etc`, `/boot`, or systemd files unless explicitly asked.

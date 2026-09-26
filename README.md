@@ -39,6 +39,7 @@ Sign out and back in (or reboot) after installation so the operator receives
 the `remlausers` group membership. Thereafter, use ordinary commands:
 
 ```bash
+remla link
 remla status
 remla start
 remla stop
@@ -46,6 +47,11 @@ remla recover
 remla upgrade
 remla rollback
 ```
+
+`remla link` creates the optional `~/remla` workspace symlink to the canonical
+`/var/lib/remla/labs` lab root. It never overwrites an existing directory or a
+link to another location; clone, branch, and update lab repositories with Git
+inside that workspace.
 
 `remla upgrade` downloads a stable GitHub release, verifies its published
 checksums, installs it alongside the current version, atomically switches the
@@ -75,7 +81,7 @@ PEP 517 wheels:
 
 ```bash
 uv sync
-uv run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety tests.test_installation tests.test_release
+uv run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety tests.test_installation tests.test_release tests.test_workspace
 uv build
 ```
 

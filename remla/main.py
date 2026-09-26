@@ -29,6 +29,7 @@ from remla.runtime_state import LabConfigIdentity
 from remla.settings import *
 from remla.systemHelpers import *
 from remla.typerHelpers import *
+from remla.workspace import WorkspaceLinkError, create_workspace_link
 from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
@@ -49,6 +50,26 @@ app.add_typer(setupcmd.app, name="setup")
 app.add_typer(i2ccmd.app, name="i2c")
 app.add_typer(camera_app, name="camera")
 app.add_typer(mediamtx_app, name="mediamtx")
+
+
+@app.command(help="Create a personal workspace link to the configured lab root.")
+def link(
+    destination: Annotated[
+        Optional[Path], typer.Argument(help="Workspace path; defaults to ~/remla.")
+    ] = None,
+):
+    workspace = destination or homeDirectory / "remla"
+    try:
+        created = create_workspace_link(workspace, remoteLabsDirectory)
+    except WorkspaceLinkError as error:
+        alert(str(error))
+        raise typer.Abort()
+    if created:
+        success(f"Created {workspace} -> {remoteLabsDirectory}")
+    elif workspace.expanduser().absolute() == remoteLabsDirectory.expanduser().absolute():
+        success(f"{workspace} is already the configured lab root")
+    else:
+        success(f"{workspace} already points to {remoteLabsDirectory}")
 
 
 def _request_foreground_shutdown(experiment, pid_path):

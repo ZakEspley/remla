@@ -122,6 +122,7 @@ Current coverage verifies repeated shutdown requests share one future, foregroun
 - [x] Complete `UPDATE_PLAN.md`: cycling is removed from `init()`, the boot guard remains only in `run()`, and camera-cycle documentation reflects MediaMTX-only restarts.
 - [ ] Verify that cycle/reset/shutdown ordering does not restart or interrupt MediaMTX unexpectedly.
 - [x] Define a dedicated `remla` systemd service account, versioned `/opt/remla` runtime, shared configuration/lab locations, operator group, group-writable IPC socket, and narrow Polkit rule for `remla.service`. Validate the rule and service ownership on Raspberry Pi OS before treating it as an access-control boundary.
+- [x] Add `remla link [PATH]` to create a safe personal symlink to the canonical lab root without overwriting existing workspace paths. Git remains responsible for cloning, branches, and updates.
 - [x] Migrate packaging from Poetry to PEP 621 + UV. GitHub tag releases build a wheel, hash-locked requirements, installer, service, and policy assets; the installer verifies release checksums and installs the wheel without requiring UV or pipx on the Pi.
 - [ ] Publish the first stable `v0.4.0` GitHub Release and validate its installer from a clean Raspberry Pi OS image. Add signed release provenance; until then the convenience installer explicitly relies on GitHub Release integrity and its checksums only detect transfer or asset corruption.
 
