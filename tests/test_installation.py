@@ -65,6 +65,7 @@ class PiInstallerTests(unittest.TestCase):
 
         self.assertIn("User=remla", content)
         self.assertIn("Group=remla", content)
+        self.assertIn("Environment=REMLA_PID_FILE=/run/remla/remla.pid", content)
         self.assertIn("ExecStart=/opt/remla/current/bin/remla run --foreground", content)
         self.assertIn("Restart=always", content)
 

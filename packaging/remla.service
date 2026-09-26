@@ -13,6 +13,7 @@ Environment=REMLA_CONFIG_HOME=/etc
 Environment=REMLA_LABS_DIRECTORY=/var/lib/remla/labs
 Environment=REMLA_IPC_SOCKET=/run/remla_cmd.sock
 Environment=REMLA_OPERATOR_GROUP=remlausers
+Environment=REMLA_PID_FILE=/run/remla/remla.pid
 ExecStart=/opt/remla/current/bin/remla run --foreground
 Restart=always
 RestartSec=5
