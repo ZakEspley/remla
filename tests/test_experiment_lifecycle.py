@@ -260,6 +260,24 @@ class ExperimentLifecycleTests(unittest.TestCase):
 
             self.assertFalse(os.path.exists(socket_path))
 
+    def test_ipc_start_accepts_a_path_socket_location(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        thread = mock.Mock()
+
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "remla.sock"
+            with mock.patch.object(
+                experiment_module.threading, "Thread", return_value=thread
+            ):
+                ipc_socket, _ = experiment.startIpcListener(
+                    ipc_path=socket_path,
+                    loop=mock.Mock(spec=asyncio.AbstractEventLoop),
+                )
+
+            self.assertTrue(socket_path.exists())
+            ipc_socket.close()
+            socket_path.unlink()
+
     def test_ipc_start_does_not_replace_an_active_listener(self):
         experiment = experiment_module.Experiment("RemoteLabs")
 

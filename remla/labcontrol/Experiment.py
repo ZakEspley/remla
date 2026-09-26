@@ -650,6 +650,7 @@ class Experiment(object):
         return names
 
     def startIpcListener(self, ipc_path=ipcSocketPath, loop=None):
+        ipc_path = str(ipc_path)
         if loop is None:
             loop = self.loop
         if loop is None:
