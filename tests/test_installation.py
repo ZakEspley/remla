@@ -82,7 +82,7 @@ class PiInstallerTests(unittest.TestCase):
 
         self.assertIn('wheel_asset="$release_directory/$(basename "$WHEEL")"', content)
         self.assertIn('install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0644 "$WHEEL" "$wheel_asset"', content)
-        self.assertIn('install --no-deps "$wheel_asset"', content)
+        self.assertIn('--force-reinstall "$wheel_asset"', content)
 
 
 class PackageBuildTests(unittest.TestCase):

@@ -148,9 +148,9 @@ if [[ -n "$REQUIREMENTS" ]]; then
     requirements_asset="$release_directory/requirements.txt"
     install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0644 "$REQUIREMENTS" "$requirements_asset"
     runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install --require-hashes --no-deps -r "$requirements_asset"
-    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install --no-deps "$wheel_asset"
+    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install --no-deps --force-reinstall "$wheel_asset"
 else
-    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install "$wheel_asset"
+    runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install --force-reinstall "$wheel_asset"
 fi
 
 install -d -o "$SERVICE_USER" -g remlausers -m 2770 /var/lib/remla/labs
