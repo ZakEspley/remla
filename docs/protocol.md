@@ -5,7 +5,7 @@
 This document defines ReMLA JSON protocol version `1.0.0`. JSON is opt-in per
 WebSocket connection: legacy clients continue to use slash-delimited requests
 and `MESSAGE:`, `ALERT:`, and `COMMAND:` frames unchanged. A connection uses
-one framing mode after negotiation and never mixes modes.
+one framing mode after WebSocket subprotocol negotiation and never mixes modes.
 
 ## Envelope
 
@@ -34,19 +34,15 @@ Every JSON frame is an object with `meta`, `type`, and `payload`:
 
 ## Negotiation
 
-A JSON-capable client sends `hello` as its first JSON frame:
+A JSON-capable client offers the WebSocket subprotocol `remla-json-v1` during
+the opening handshake. The server selects it only when supported. A client that
+offers no subprotocol remains in legacy mode and receives the existing initial
+legacy control-status alert immediately. This avoids requiring legacy clients
+to send a first frame before they can receive control state.
 
-```json
-{
-  "meta": {"timestamp": "2026-09-27T20:15:30Z", "version": "1.0.0", "messageId": "client-hello", "replyId": null},
-  "type": "hello",
-  "payload": {"protocols": ["remla-json-v1"]}
-}
-```
-
-The server replies with a `result` selecting `remla-json-v1`. A client that
-does not negotiate remains in legacy mode. Invalid JSON before successful
-negotiation is handled as a legacy frame.
+After selection, every frame on the connection is JSON version `1.0.0`.
+Unsupported subprotocol offers are rejected during the WebSocket handshake;
+legacy framing is never inferred from invalid JSON.
 
 ## Commands
 
