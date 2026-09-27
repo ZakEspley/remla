@@ -1,4 +1,9 @@
+import os
 import shutil
+import stat
+import subprocess
+import tempfile
+from pathlib import Path
 
 import typer
 from .systemHelpers import getSettings, clearDirectory, promptForNumericFile, updateRemlaNginxConf
@@ -111,26 +116,191 @@ def interactive():
 
     labSettings["network"] = networkSettings
     labSettings["website"] = websiteSettings
-    _setup(labSettings)
     yaml.dump(remlaSettings, settingsDirectory/"settings.yml")
     yaml.dump(labSettings, remoteLabsDirectory/remlaSettings["currentLab"])
 
 def _setup(labSettings:dict)->None:
     networkSettings = labSettings["network"]
     websiteSettings = labSettings["website"]
-    updateRemlaNginxConf(networkSettings["port"], networkSettings["domain"], networkSettings["wsPort"])
-    clearDirectory(websiteDirectory)
-    shutil.copy(remoteLabsDirectory / websiteSettings["index"], websiteDirectory / "index.html")
-    if websiteSettings["commonStaticFolder"]:
-        shutil.copytree(remoteLabsDirectory / "static", websiteDirectory / "static", dirs_exist_ok=True)
-    if websiteSettings["staticFolder"] is not None:
-        shutil.copytree(remoteLabsDirectory/websiteSettings["staticFolder"], websiteDirectory / "static", dirs_exist_ok=True)
-    requiredFiles = ["reader.js", "mediaMTXGetFeed.js", "remlaSocket.js"]
-    for file in requiredFiles:
-        shutil.copy(setupDirectory / file, websiteJSDirectory)
+    if not portValidator(networkSettings.get("port"), alertUser=False):
+        raise ValueError("The website port is invalid.")
+    if not portValidator(networkSettings.get("wsPort"), alertUser=False):
+        raise ValueError("The WebSocket port is invalid.")
+    if networkSettings["port"] == networkSettings["wsPort"]:
+        raise ValueError("The website and WebSocket ports must differ.")
+    if not domainOrHostnameValidtor(networkSettings.get("domain"), alertUser=False):
+        raise ValueError("The website domain is invalid.")
 
-    shutil.copytree(websiteDirectory, nginxWebsitePath, dirs_exist_ok=True)
-    set_website_permissions(nginxWebsitePath)
+    staging_path = Path(tempfile.mkdtemp(prefix=".remla-website-", dir=nginxWebsitePath.parent))
+    try:
+        copy_lab_asset(websiteSettings["index"], staging_path / "index.html")
+        if websiteSettings["commonStaticFolder"]:
+            copy_lab_asset(Path("static"), staging_path / "static", directory=True)
+        if websiteSettings["staticFolder"] is not None:
+            copy_lab_asset(websiteSettings["staticFolder"], staging_path / "static", directory=True)
+        setup_js_directory = staging_path / "static" / "js"
+        setup_js_directory.mkdir(parents=True, exist_ok=True)
+        for filename in ("reader.js", "mediaMTXGetFeed.js", "remlaSocket.js"):
+            shutil.copy(setupDirectory / filename, setup_js_directory)
+        set_website_permissions(staging_path)
+    except BaseException:
+        shutil.rmtree(staging_path, ignore_errors=True)
+        raise
+
+    previous_config = snapshot_nginx_config()
+    try:
+        updateRemlaNginxConf(networkSettings["port"], networkSettings["domain"], networkSettings["wsPort"])
+        subprocess.run(["nginx", "-t"], check=True)
+    except BaseException:
+        restore_nginx_config(previous_config)
+        shutil.rmtree(staging_path, ignore_errors=True)
+        raise
+    try:
+        return replace_website(staging_path), previous_config
+    except BaseException:
+        restore_nginx_config(previous_config)
+        shutil.rmtree(staging_path, ignore_errors=True)
+        raise
+
+
+def copy_lab_asset(asset: Path | str, destination: Path, directory: bool = False) -> None:
+    descriptor = open_lab_asset(asset, directory)
+    try:
+        if directory:
+            copy_directory_descriptor(descriptor, destination)
+        else:
+            copy_file_descriptor(descriptor, destination)
+    finally:
+        os.close(descriptor)
+
+
+def open_lab_asset(asset: Path | str, directory: bool = False) -> int:
+    asset_path = Path(asset)
+    if asset_path.is_absolute() or ".." in asset_path.parts:
+        raise ValueError("Website assets must be inside the lab directory.")
+    directory_descriptor = os.open(remoteLabsDirectory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in asset_path.parts[:-1]:
+            next_descriptor = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_descriptor)
+            os.close(directory_descriptor)
+            directory_descriptor = next_descriptor
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+        if directory:
+            flags |= os.O_DIRECTORY
+        asset_descriptor = os.open(asset_path.name, flags, dir_fd=directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
+    asset_stat = os.fstat(asset_descriptor)
+    expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+    if not expected_type(asset_stat.st_mode):
+        os.close(asset_descriptor)
+        kind = "directory" if directory else "file"
+        raise ValueError(f"Website asset is not a {kind}: {asset_path}")
+    return asset_descriptor
+
+
+def copy_file_descriptor(source_descriptor: int, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with os.fdopen(os.dup(source_descriptor), "rb") as source_file, open(destination, "wb") as destination_file:
+        shutil.copyfileobj(source_file, destination_file)
+
+
+def copy_directory_descriptor(source_descriptor: int, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in os.listdir(source_descriptor):
+        entry = os.stat(name, dir_fd=source_descriptor, follow_symlinks=False)
+        if stat.S_ISDIR(entry.st_mode):
+            child_descriptor = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=source_descriptor)
+            try:
+                copy_directory_descriptor(child_descriptor, destination / name)
+            finally:
+                os.close(child_descriptor)
+        elif stat.S_ISREG(entry.st_mode):
+            child_descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=source_descriptor)
+            try:
+                if not stat.S_ISREG(os.fstat(child_descriptor).st_mode):
+                    raise ValueError("Website assets cannot contain symbolic links or special files.")
+                copy_file_descriptor(child_descriptor, destination / name)
+            finally:
+                os.close(child_descriptor)
+        else:
+            raise ValueError("Website assets cannot contain symbolic links or special files.")
+
+
+def replace_website(staging_path: Path) -> Path | None:
+    backup_path = None
+    if nginxWebsitePath.exists() or nginxWebsitePath.is_symlink():
+        backup_path = nginxWebsitePath.with_name(f".remla-website-previous-{staging_path.name.rsplit('-', 1)[-1]}")
+        os.replace(nginxWebsitePath, backup_path)
+    try:
+        os.replace(staging_path, nginxWebsitePath)
+    except BaseException:
+        if backup_path is not None:
+            os.replace(backup_path, nginxWebsitePath)
+        raise
+    return backup_path
+
+
+def restore_nginx_config(previous_config: bytes | None) -> None:
+    if previous_config is None:
+        nginxConfPath.unlink(missing_ok=True)
+        return
+    if nginxConfPath.is_symlink():
+        nginxConfPath.unlink()
+    nginxConfPath.write_bytes(previous_config)
+
+
+def snapshot_nginx_config() -> bytes | None:
+    if not nginxConfPath.exists() and not nginxConfPath.is_symlink():
+        return None
+    flags = os.O_RDONLY | os.O_NONBLOCK
+    if not nginxConfPath.is_symlink():
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(nginxConfPath, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("Existing nginx configuration is not a regular file.")
+        chunks = []
+        while chunk := os.read(descriptor, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+@app.command("deploy-website", help="Deploy the selected lab website to nginx.")
+def deploy_website():
+    if os.geteuid() != 0:
+        alert("Website deployment must be run as root.")
+        typer.echo("Try running:")
+        typer.echo("sudo remla setup deploy-website")
+        raise typer.Abort()
+
+    remlaSettings = getSettings()
+    current_lab = remlaSettings.get("currentLab")
+    if current_lab is None:
+        alert("Select a lab before deploying its website.")
+        raise typer.Abort()
+
+    lab_path = remoteLabsDirectory / current_lab
+    if not lab_path.is_file():
+        alert(f"The selected lab file does not exist: {lab_path}")
+        raise typer.Abort()
+
+    backup_path, previous_config = _setup(yaml.load(lab_path))
+    try:
+        subprocess.run(["systemctl", "reload", "nginx"], check=True)
+    except BaseException:
+        restore_nginx_config(previous_config)
+        if backup_path is not None:
+            failed_path = backup_path.with_name(f".remla-website-failed-{backup_path.name.rsplit('-', 1)[-1]}")
+            os.replace(nginxWebsitePath, failed_path)
+            os.replace(backup_path, nginxWebsitePath)
+            shutil.rmtree(failed_path, ignore_errors=True)
+        raise
+    if backup_path is not None:
+        shutil.rmtree(backup_path)
+    success("Deployed the selected lab website.")
 
 @app.command()
 def lab(labfile: Annotated[str, typer.Argument()],
@@ -205,7 +375,6 @@ def lab(labfile: Annotated[str, typer.Argument()],
     labSettings["website"]["commonStaticFolder"] = commonStaticFolder
     labSettings["website"]["staticFolder"] = staticFolder
 
-    _setup(labSettings)
     yaml.dump(labSettings, labFilePath)
     yaml.dump(remlaSettings, settingsDirectory/"settings.yml")
 

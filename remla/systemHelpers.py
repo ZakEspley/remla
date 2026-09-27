@@ -208,17 +208,14 @@ def updateRemlaNginxConf(port: int, domain:str, wsPort:int) -> None:
     modifiedConf = re.sub(r'\{\{\s*hostname\s*\}\}', domain, modifiedConf)
     modifiedConf = re.sub(r'\{\{\s*wsPort\s*\}\}', str(wsPort), modifiedConf)
 
-    modifiedConfPath = settingsDirectory / "remla.conf"
-    # with normalUserPrivileges():
+    modifiedConfPath = nginxConfPath
+    if modifiedConfPath.is_symlink():
+        modifiedConfPath.unlink()
     with open(modifiedConfPath, "w") as file:
         file.write(modifiedConf)
-    # writeFileAsUser(modifiedConfPath, modifiedConf)
-    nginxAvailableSymPath = nginxAvailablePath / "remla.conf"
-    if not nginxAvailableSymPath.exists():
-        nginxAvailableSymPath.symlink_to(modifiedConfPath)
     nginxEnableSymPath = nginxEnabledPath / "remla.conf"
     if not nginxEnableSymPath.exists():
-        nginxEnableSymPath.symlink_to(nginxAvailableSymPath)
+        nginxEnableSymPath.symlink_to(modifiedConfPath)
 
 def runAsUser(func:callable, *args, **kwargs):
     currentUid = os.geteuid()

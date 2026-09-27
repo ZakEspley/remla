@@ -125,7 +125,7 @@ Current coverage verifies repeated shutdown requests share one future, foregroun
 - [x] Define a dedicated `remla` systemd service account, versioned `/opt/remla` runtime, shared configuration/lab locations, operator group, group-writable IPC socket, and narrow Polkit rule for `remla.service`. Validate the rule and service ownership on Raspberry Pi OS before treating it as an access-control boundary.
 - [x] Add `remla link [PATH]` to create a safe personal symlink to the canonical lab root without overwriting existing workspace paths. Git remains responsible for cloning, branches, and updates.
 - [x] Migrate packaging from Poetry to PEP 621 + UV. GitHub tag releases build a wheel, hash-locked requirements, installer, service, and policy assets; the installer verifies release checksums and installs the wheel without requiring UV or pipx on the Pi.
-- [ ] Make installer/setup website deployment consistently create an nginx-readable `/var/www/remla` tree and separate its privileged copy/configuration work from unprivileged lab selection.
+- [x] Keep `remla setup int` and `remla setup lab` unprivileged for lab selection/configuration; `sudo remla setup deploy-website` now performs nginx configuration and website deployment to `/var/www/remla`.
 - [ ] Remove credential-bearing device configuration from startup logs, migrate PDU credentials out of Git-managed lab YAML, and rotate the exposed diffrac2 PDU credential before committing or sharing that lab workspace.
 - [ ] Publish the first stable `v0.4.0` GitHub Release and validate its installer from a clean Raspberry Pi OS image. Add signed release provenance; until then the convenience installer explicitly relies on GitHub Release integrity and its checksums only detect transfer or asset corruption.
 

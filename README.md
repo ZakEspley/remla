@@ -19,13 +19,13 @@ version:
 curl -fsSL https://github.com/ZakEspley/remla/releases/download/v0.4.0/install.sh | sudo bash -s -- --version 0.4.0
 ```
 
-The installer is the only normal ReMLA command that requires `sudo`. It
-installs apt dependencies, ReMLA into `/opt/remla`, a global `/usr/local/bin/remla`
-wrapper, MediaMTX, nginx, pigpiod, the `remla` systemd service, and restricted
-operator access. It verifies the downloaded wheel and locked requirements
-against the release `SHA256SUMS` file, then runs the interactive lab and camera
-setup. The convenience command intentionally trusts GitHub Releases for the
-bootstrap script; its checksums detect transfer or asset corruption but do not
+The installer configures privileged system resources: apt dependencies, ReMLA
+in `/opt/remla`, a global `/usr/local/bin/remla` wrapper, MediaMTX, nginx,
+pigpiod, the `remla` systemd service, and restricted operator access. It
+verifies the downloaded wheel and locked requirements against the release
+`SHA256SUMS` file, then runs the interactive lab and camera setup. The
+convenience command intentionally trusts GitHub Releases for the bootstrap
+script; its checksums detect transfer or asset corruption but do not
 independently authenticate a compromised GitHub release. Review a tagged
 installer before use if your deployment requires that assurance:
 
@@ -41,7 +41,7 @@ the `remlausers` group membership. Thereafter, use ordinary commands:
 ```bash
 remla link
 remla status
-remla start
+systemctl start remla.service
 remla stop
 remla recover
 remla upgrade
@@ -58,6 +58,22 @@ checksums, installs it alongside the current version, atomically switches the
 runtime, and restarts only `remla.service`. `remla rollback` switches back to
 the previous locally installed release. Operating-system updates remain the Pi
 administrator's responsibility.
+
+## Select and deploy a lab website
+
+Lab selection updates only group-writable ReMLA configuration and does not
+need root access:
+
+```bash
+remla setup int
+```
+
+After changing website or network settings, deploy the selected lab's website
+and nginx configuration with the separate privileged command:
+
+```bash
+sudo remla setup deploy-website
+```
 
 ## Reconfigure camera hardware
 
@@ -96,7 +112,7 @@ PEP 517 wheels:
 
 ```bash
 uv sync
-uv run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety tests.test_installation tests.test_release tests.test_workspace tests.test_web_deployment
+uv run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety tests.test_installation tests.test_release tests.test_workspace tests.test_setup_commands tests.test_web_deployment
 uv build
 ```
 
