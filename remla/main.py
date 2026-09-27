@@ -1001,7 +1001,7 @@ def run(
         try:
             initialize_hardware_resources()
             devices = createDevicesFromYml(labSettings["devices"])
-            print("Using devices:", labSettings["devices"])
+            print("Using device types:", device_type_summary(labSettings["devices"]))
             state_result = experiment.load_persisted_state()
             if state_result is not None and state_result.message is not None:
                 warning(state_result.message)
@@ -1042,6 +1042,10 @@ def start():
         success("Started remla")
     except (OSError, subprocess.CalledProcessError) as exc:
         alert(f"Failed to start remla: {exc}")
+
+
+def device_type_summary(devices):
+    return {name: details.get("type", "unknown") for name, details in devices.items()}
 
 
 @app.command()

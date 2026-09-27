@@ -368,6 +368,7 @@ class StepperI2C(MotorKit, BaseController):
         homeSwitch=None,
         degPerStep=1.8,
         gearRatio=1,
+        initialPosition=0,
     ):
         if terminal > 2:
             self.address = 0x61
@@ -383,7 +384,8 @@ class StepperI2C(MotorKit, BaseController):
             4: super().stepper2,
         }
         self.refPoints = refPoints
-        self.currentPosition = 0
+        self.initialPosition = initialPosition
+        self.currentPosition = initialPosition
         self.device = self.terminal_options[terminal]
         self.delay = delay
         self.lowerBound = bounds[0]
@@ -523,7 +525,7 @@ class StepperI2C(MotorKit, BaseController):
         if self.homeSwitch is not None:
             self.home(1)
         else:
-            self.move(-self.currentPosition)
+            self.move(self.initialPosition - self.currentPosition)
 
     def safe_stop(self):
         self.device.release()

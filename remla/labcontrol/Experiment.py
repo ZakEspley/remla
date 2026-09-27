@@ -301,8 +301,31 @@ class Experiment(object):
         previous_handoff_user = self.ownership.handoff_user
         self.ownership.disconnect(websocket)
         self.activeClient = self.ownership.active_owner
+        if (
+            was_active_owner
+            and self.ownership.active_owner is None
+            and self.ownership.handoff_user is None
+        ):
+            await self.reset_after_owner_disconnect()
         if self.ownership.handoff_user != previous_handoff_user:
             await self.notify_handoff_user()
+
+    async def reset_after_owner_disconnect(self):
+        self._runtime_state = "resetting"
+        try:
+            await self.cancel_queued_operations()
+            await self.command_scheduler.wait_for_idle()
+            if self.executor is None:
+                self.resetExperiment()
+            else:
+                loop = asyncio.get_running_loop()
+                async with self.command_scheduler.reset_barrier():
+                    await loop.run_in_executor(self.executor, self.resetExperiment)
+        except Exception as error:
+            await self.enter_fault(f"Owner disconnect reset failed: {error}")
+            return False
+        self._runtime_state = "ready"
+        return True
 
     async def drain_owner_operations(self, owner_id):
         cancelled_operation_ids = self.operation_registry.cancel_waiting_for_owner(

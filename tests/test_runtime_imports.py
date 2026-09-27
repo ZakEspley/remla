@@ -75,6 +75,18 @@ class RuntimeImportTests(unittest.TestCase):
         run.assert_called_once_with(["systemctl", "start", "remla.service"], check=True)
         success.assert_called_once_with("Started remla")
 
+    def test_device_summary_excludes_configuration_values(self):
+        from remla import main
+
+        summary = main.device_type_summary(
+            {
+                "pdu": {"type": "PDUOutlet", "password": "secret"},
+                "camera": {"type": "ArduCamMultiCamera", "i2cbus": 11},
+            }
+        )
+
+        self.assertEqual(summary, {"pdu": "PDUOutlet", "camera": "ArduCamMultiCamera"})
+
     def test_main_imports_without_raspberry_pi_hardware(self):
         result = subprocess.run(
             [sys.executable, "-c", "import remla.main"],

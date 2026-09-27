@@ -47,7 +47,7 @@
 - Track every submitted operation and its required lock group so an owner change, reset, timeout, or shutdown can identify both work waiting for a named group and work already running.
 - Enforce a per-active-user outstanding-operation limit, per-command execution timeout, and one terminal response/event per operation ID. This is backpressure, not a global command queue.
 - Reject commands when lifecycle is not `ready`, the sender is not the active owner, the sender exceeds its outstanding-operation limit, or device lock-group metadata is invalid.
-- A client disconnect cancels that client's operations still waiting for a lock. A running command is handled by its device-specific stop/reset contract; cancelling an asyncio task alone is not considered a hardware stop.
+- [x] An active-owner disconnect cancels that client's operations still waiting for a lock and drains running work. A waiting user receives the reset-or-continue handoff without hardware changes; no waiting user triggers a full reset. A running command is handled by its device-specific stop/reset contract; cancelling an asyncio task alone is not considered a hardware stop.
 - Reset is a lock barrier: stop accepting normal work, acquire all named lock groups in a deterministic order, cancel outgoing-client work that has not started, resolve or safely stop running work, reset devices, persist terminal state, then return to `ready` with no owner or a handoff-pending owner.
 - On owner disconnect, do not admit a new owner's normal commands until all outgoing work is terminal and the promoted user chooses reset or continue. If they do not choose in time, reset. On reset failure, enter `faulted`; expose only status/diagnostic actions until an explicit recovery succeeds.
 - On operation timeout, enter `faulted` and freeze all command admission without automatically resetting hardware. An operator-initiated, device-specific recovery must safely stop the operation and observe its terminal outcome before reopening admission.
@@ -55,6 +55,7 @@
 ### Reset and resource-release contract
 - Support reset reasons: `owner_disconnect`, `operator_request`, `foreground_signal`, `service_stop`, `startup_failure`, and `fault_recovery`.
 - Every controller must declare one of: safe reset implementation, close/release implementation, or an explicit no-hardware/no-reset classification. Eliminate silent `pass` resets for actuators and hardware clients.
+- Define a per-lab baseline schema for homing and device-specific reset targets; `docs/reset-baseline.md` records the current controller-defined defaults, while motor position remains process-tracked from YAML `initialPosition`.
 - Build reset order from the configured device dependency graph: dependent devices stop/reset before their providers. Preserve this order for close/release.
 - Ensure camera reset releases camera, encoder, output, allocator, and MediaMTX-related resources through the camera controller’s explicit cleanup path.
 - Run blocking device operations only through the runtime executor; run reset operations under the same scheduler/barrier rules as commands.

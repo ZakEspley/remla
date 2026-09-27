@@ -46,6 +46,17 @@ class ExperimentLifecycleTests(unittest.TestCase):
         create_socket.assert_not_called()
         create_thread.assert_not_called()
 
+    def test_reset_experiment_resets_controllers_and_measurements(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        controller = mock.Mock(deviceType="controller")
+        measurement = mock.Mock(deviceType="measurement")
+        experiment.devices = {"laser": controller, "camera": measurement}
+
+        experiment.resetExperiment()
+
+        controller.reset.assert_called_once_with()
+        measurement.reset.assert_called_once_with()
+
     def test_runtime_initialization_is_explicit_and_idempotent(self):
         loop = mock.Mock(spec=asyncio.AbstractEventLoop)
         executor = mock.Mock()
@@ -598,6 +609,36 @@ class ExperimentHandoffTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ExperimentOwnerDrainTests(unittest.IsolatedAsyncioTestCase):
+    async def test_owner_disconnect_without_successor_resets_all_devices(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        controller = mock.Mock(deviceType="controller")
+        measurement = mock.Mock(deviceType="measurement")
+        experiment.devices = {"laser": controller, "camera": measurement}
+        experiment.ownership.connect("owner")
+
+        await experiment.disconnect_client("owner")
+
+        controller.reset.assert_called_once_with()
+        measurement.reset.assert_called_once_with()
+
+    async def test_owner_disconnect_with_successor_does_not_reset_devices(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        controller = mock.Mock(deviceType="controller")
+        measurement = mock.Mock(deviceType="measurement")
+        experiment.devices = {"laser": controller, "camera": measurement}
+        experiment.notify_handoff_user = mock.AsyncMock()
+        experiment.ownership.connect("owner")
+        experiment.ownership.connect("next")
+
+        await experiment.disconnect_client("owner")
+
+        controller.reset.assert_not_called()
+        measurement.reset.assert_not_called()
+        controller.safe_stop.assert_not_called()
+        measurement.safe_stop.assert_not_called()
+        self.assertEqual(experiment.ownership.handoff_user, "next")
+        experiment.notify_handoff_user.assert_awaited_once_with()
+
     async def test_owner_disconnect_waits_for_running_operation_before_handoff(self):
         experiment = experiment_module.Experiment("RemoteLabs")
         experiment.notify_handoff_user = mock.AsyncMock()
