@@ -294,6 +294,7 @@ class Experiment(object):
 
     async def disconnect_client(self, websocket):
         was_active_owner = websocket == self.ownership.active_owner
+        was_handoff_user = websocket == self.ownership.handoff_user
         if was_active_owner:
             self.activeClient = None
             await self.drain_owner_operations(websocket)
@@ -302,7 +303,7 @@ class Experiment(object):
         self.ownership.disconnect(websocket)
         self.activeClient = self.ownership.active_owner
         if (
-            was_active_owner
+            (was_active_owner or was_handoff_user)
             and self.ownership.active_owner is None
             and self.ownership.handoff_user is None
         ):
@@ -320,7 +321,9 @@ class Experiment(object):
             else:
                 loop = asyncio.get_running_loop()
                 async with self.command_scheduler.reset_barrier():
-                    await loop.run_in_executor(self.executor, self.resetExperiment)
+                    await loop.run_in_executor(
+                        self.executor, self.resetExperiment, "owner_disconnect_empty"
+                    )
         except Exception as error:
             await self.enter_fault(f"Owner disconnect reset failed: {error}")
             return False
@@ -388,6 +391,7 @@ class Experiment(object):
         await self.complete_handoff_reset(
             websocket,
             "Experiment/controlStatus/1,Reset complete. You have control of the lab equipment.",
+            "handoff_choice",
         )
 
     def schedule_handoff_timeout(self):
@@ -431,16 +435,17 @@ class Experiment(object):
         await self.complete_handoff_reset(
             handoff_user,
             "Experiment/controlStatus/1,Handoff timed out. Reset complete. You have control of the lab equipment.",
+            "handoff_timeout",
         )
 
-    async def complete_handoff_reset(self, websocket, success_message):
+    async def complete_handoff_reset(self, websocket, success_message, reset_reason):
         self._runtime_state = "resetting"
         try:
             await self.cancel_queued_operations()
             await self.command_scheduler.wait_for_idle()
             loop = asyncio.get_running_loop()
             async with self.command_scheduler.reset_barrier():
-                await loop.run_in_executor(self.executor, self.resetExperiment)
+                await loop.run_in_executor(self.executor, self.resetExperiment, reset_reason)
         except Exception as error:
             self.ownership.complete_reset(success=False)
             self.activeClient = self.ownership.active_owner
@@ -573,6 +578,8 @@ class Experiment(object):
             await self.sendMessage(websocket, f"{deviceName} ran {method}")
 
     async def _execute_device_method(self, device, method, params):
+        if device.__class__.__name__ == "ArduCamMultiCamera" and method in {"camera", "cameraName"}:
+            print(f"Executing accepted camera command {method}/{params[0]}")
         camera_switch = (
             method in {"camera", "cameraName"}
             and device.__class__.__name__ == "PiCamera2MultiCam"
@@ -820,8 +827,9 @@ class Experiment(object):
         if self.ipc_path is not None:
             self.ipc_path.unlink(missing_ok=True)
 
-    def resetExperiment(self):
-        logging.info("Resetting experiment to original state.")
+    def resetExperiment(self, reason="unspecified"):
+        logging.info("Resetting experiment to original state. reason=%s", reason)
+        print(f"Resetting experiment reason={reason}")
         for deviceName, device in self.devices.items():
             logging.info(f"Resetting device {deviceName}")
             device.reset()

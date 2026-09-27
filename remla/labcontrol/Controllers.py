@@ -1578,6 +1578,7 @@ class ArduCamMultiCamera(BaseController):
         return params
 
     def reset(self):
+        print(f"Resetting camera {self.name} to initial camera {self.initialCamera}")
         self.camera(self.initialCamera)
         if self.defaultSettings is not None:
             for setting, value in self.defaultSettings.items():

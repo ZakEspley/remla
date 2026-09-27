@@ -498,7 +498,7 @@ class ExperimentHandoffTests(unittest.IsolatedAsyncioTestCase):
             )
 
         loop.run_in_executor.assert_awaited_once_with(
-            self.experiment.executor, self.experiment.resetExperiment
+            self.experiment.executor, self.experiment.resetExperiment, "handoff_choice"
         )
         self.assertEqual(self.experiment.activeClient, self.next_client)
         self.assertTrue(self.experiment.ownership.can_submit(self.next_client))
@@ -565,7 +565,7 @@ class ExperimentHandoffTests(unittest.IsolatedAsyncioTestCase):
             await self.experiment._handoff_timeout_task
 
         loop.run_in_executor.assert_awaited_once_with(
-            self.experiment.executor, self.experiment.resetExperiment
+            self.experiment.executor, self.experiment.resetExperiment, "handoff_timeout"
         )
         self.assertEqual(self.experiment.activeClient, self.next_client)
         self.assertTrue(self.experiment.ownership.can_submit(self.next_client))
@@ -614,6 +614,7 @@ class ExperimentOwnerDrainTests(unittest.IsolatedAsyncioTestCase):
         controller = mock.Mock(deviceType="controller")
         measurement = mock.Mock(deviceType="measurement")
         experiment.devices = {"laser": controller, "camera": measurement}
+        experiment.notify_handoff_user = mock.AsyncMock()
         experiment.ownership.connect("owner")
 
         await experiment.disconnect_client("owner")
@@ -638,6 +639,21 @@ class ExperimentOwnerDrainTests(unittest.IsolatedAsyncioTestCase):
         measurement.safe_stop.assert_not_called()
         self.assertEqual(experiment.ownership.handoff_user, "next")
         experiment.notify_handoff_user.assert_awaited_once_with()
+
+    async def test_pending_handoff_disconnect_without_successor_resets_all_devices(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        controller = mock.Mock(deviceType="controller")
+        measurement = mock.Mock(deviceType="measurement")
+        experiment.devices = {"laser": controller, "camera": measurement}
+        experiment.notify_handoff_user = mock.AsyncMock()
+        experiment.ownership.connect("owner")
+        experiment.ownership.connect("next")
+
+        await experiment.disconnect_client("owner")
+        await experiment.disconnect_client("next")
+
+        controller.reset.assert_called_once_with()
+        measurement.reset.assert_called_once_with()
 
     async def test_owner_disconnect_waits_for_running_operation_before_handoff(self):
         experiment = experiment_module.Experiment("RemoteLabs")
@@ -776,7 +792,7 @@ class ExperimentOwnerDrainTests(unittest.IsolatedAsyncioTestCase):
             await queued_task
 
         loop.run_in_executor.assert_awaited_once_with(
-            experiment.executor, experiment.resetExperiment
+            experiment.executor, experiment.resetExperiment, "handoff_choice"
         )
         self.assertTrue(experiment.ownership.can_submit("next"))
 
