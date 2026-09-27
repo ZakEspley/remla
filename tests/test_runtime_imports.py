@@ -63,6 +63,18 @@ class RuntimeImportTests(unittest.TestCase):
         self.assertEqual(result, {"ok": True, "state": "ready"})
         socket_client.sendall.assert_called_once_with(b"recover/reset")
 
+    def test_start_starts_the_remla_service(self):
+        from remla import main
+
+        with (
+            mock.patch.object(main.subprocess, "run") as run,
+            mock.patch.object(main, "success") as success,
+        ):
+            main.start()
+
+        run.assert_called_once_with(["systemctl", "start", "remla.service"], check=True)
+        success.assert_called_once_with("Started remla")
+
     def test_main_imports_without_raspberry_pi_hardware(self):
         result = subprocess.run(
             [sys.executable, "-c", "import remla.main"],

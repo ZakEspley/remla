@@ -130,6 +130,7 @@
 - Show config path: `uv run remla showconfig`
 - Start service foreground: `uv run remla run -f`
 - Start background service: `uv run remla run`
+- Start installed service: `uv run remla start`
 - Stop service: `uv run remla stop`
 - Service status: `uv run remla status`
 - Recover a faulted running service: `uv run remla recover`

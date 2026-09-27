@@ -1036,6 +1036,15 @@ def run(
 
 
 @app.command()
+def start():
+    try:
+        subprocess.run(["systemctl", "start", "remla.service"], check=True)
+        success("Started remla")
+    except (OSError, subprocess.CalledProcessError) as exc:
+        alert(f"Failed to start remla: {exc}")
+
+
+@app.command()
 def stop():
     try:
         typer.echo(

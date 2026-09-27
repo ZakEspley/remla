@@ -41,7 +41,7 @@ the `remlausers` group membership. Thereafter, use ordinary commands:
 ```bash
 remla link
 remla status
-systemctl start remla.service
+remla start
 remla stop
 remla recover
 remla upgrade
