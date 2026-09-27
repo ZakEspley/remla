@@ -13,6 +13,7 @@
 ## Completed discovery
 - [x] Built the repository knowledge graph in `graphify-out/`.
 - [x] Completed a read-only architecture, packaging, protocol, and runtime-lifecycle assessment (2026-08-29).
+- [x] Defined JSON protocol version 1 with opt-in `hello` negotiation, correlated command results, and named events in `docs/protocol.md`.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
 ## Current runtime defects to remove
