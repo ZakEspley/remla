@@ -84,6 +84,22 @@ class ControllerSafeStopTests(unittest.TestCase):
 
         controller.close.assert_called_once_with()
 
+    def test_arducam_reset_logs_its_configured_camera(self):
+        controller = object.__new__(controllers.ArduCamMultiCamera)
+        controller.initParameters = {}
+        controller.name = "Camera"
+        controller.initialCamera = "a"
+        controller.defaultSettings = None
+        controller.camera = mock.Mock()
+
+        with mock.patch.object(controllers, "logging") as logging:
+            controller.reset()
+
+        controller.camera.assert_called_once_with("a")
+        logging.info.assert_called_once_with(
+            "Resetting camera %s to initial camera %s", "Camera", "a"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
