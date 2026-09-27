@@ -59,6 +59,21 @@ runtime, and restarts only `remla.service`. `remla rollback` switches back to
 the previous locally installed release. Operating-system updates remain the Pi
 administrator's responsibility.
 
+## Reconfigure camera hardware
+
+To change the camera sensor, mux type, camera count, or mux ports without
+reinstalling ReMLA, run during a maintenance window:
+
+```bash
+sudo remla camera setup
+```
+
+The command stops `remla.service`, backs up and updates
+`/boot/firmware/config.txt`, and requires a reboot. It does not change the
+selected lab YAML: update that YAML's `numCameras`, `cameraNamesDict`, and
+`initialCamera` fields to match the physical configuration before starting
+ReMLA after reboot.
+
 ## Local Pi validation
 
 Build a development wheel with UV, then run the same installer against that

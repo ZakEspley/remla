@@ -68,6 +68,7 @@ class PiInstallerTests(unittest.TestCase):
         self.assertIn("Environment=REMLA_PID_FILE=/run/remla/remla.pid", content)
         self.assertIn("Environment=REMLA_IPC_SOCKET=/run/remla/remla_cmd.sock", content)
         self.assertIn("RuntimeDirectoryMode=0755", content)
+        self.assertIn("ConditionPathExists=!/run/remla-camera-setup.lock", content)
         self.assertIn("ExecStart=/opt/remla/current/bin/remla run --foreground", content)
         self.assertIn("Restart=always", content)
 

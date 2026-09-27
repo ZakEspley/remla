@@ -2,6 +2,7 @@
 Description=ReMLA laboratory controller
 After=network-online.target pigpiod.service mediamtx.service
 Wants=network-online.target
+ConditionPathExists=!/run/remla-camera-setup.lock
 
 [Service]
 Type=simple

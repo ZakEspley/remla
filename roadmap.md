@@ -120,6 +120,7 @@ Current coverage verifies repeated shutdown requests share one future, foregroun
 
 ### 6. Apply camera-cycle plan and deployment boundaries
 - [x] Complete `UPDATE_PLAN.md`: cycling is removed from `init()`, the boot guard remains only in `run()`, and camera-cycle documentation reflects MediaMTX-only restarts.
+- [x] Extract camera sensor/mux configuration from installation into `sudo remla camera setup`; it stops ReMLA, backs up and updates boot configuration, and requires an operator reboot without reinstalling packages or redeploying the lab website.
 - [ ] Verify that cycle/reset/shutdown ordering does not restart or interrupt MediaMTX unexpectedly.
 - [x] Define a dedicated `remla` systemd service account, versioned `/opt/remla` runtime, shared configuration/lab locations, operator group, group-writable IPC socket, and narrow Polkit rule for `remla.service`. Validate the rule and service ownership on Raspberry Pi OS before treating it as an access-control boundary.
 - [x] Add `remla link [PATH]` to create a safe personal symlink to the canonical lab root without overwriting existing workspace paths. Git remains responsible for cloning, branches, and updates.

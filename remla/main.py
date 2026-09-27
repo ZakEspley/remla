@@ -36,6 +36,7 @@ from remla.yaml import createDevicesFromYml, yaml
 from .customvalidators import *
 
 __version__ = "0.4.0.dev0"
+cameraSetupLockPath = Path("/run/remla-camera-setup.lock")
 
 
 def version_callback(value: bool):
@@ -275,6 +276,42 @@ def camera_init(
         )
 
 
+@camera_app.command("setup", help="Configure camera sensor and mux boot settings, then require a reboot.")
+def camera_setup():
+    if os.geteuid() != 0:
+        alert("This command must be run as root.")
+        typer.echo("Try running:")
+        typer.echo("sudo remla camera setup")
+        raise typer.Abort()
+    if not typer.confirm("Stop ReMLA before changing camera boot settings?", default=True):
+        raise typer.Abort()
+    if not create_camera_setup_lock():
+        alert("Camera setup is already active or a reboot is still required.")
+        raise typer.Abort()
+    try:
+        was_active = subprocess.run(
+            ["systemctl", "is-active", "--quiet", "remla.service"], check=False
+        ).returncode == 0
+    except BaseException:
+        cameraSetupLockPath.unlink(missing_ok=True)
+        raise
+    try:
+        subprocess.run(["systemctl", "stop", "remla.service"], check=True)
+    except subprocess.CalledProcessError as error:
+        cameraSetupLockPath.unlink(missing_ok=True)
+        alert(f"Could not stop ReMLA: {error}")
+        raise typer.Abort() from error
+    completed = configure_camera_hardware()
+    if not completed:
+        cameraSetupLockPath.unlink(missing_ok=True)
+        if was_active:
+            subprocess.run(["systemctl", "start", "remla.service"], check=True)
+        warning("Camera boot settings were not changed. ReMLA was restored to its previous state.")
+        return
+    warning("Update the selected lab YAML if its camera count, names, or initial camera changed.")
+    success("Camera boot settings updated. Reboot the Raspberry Pi before starting ReMLA.")
+
+
 @app.command(
     help="Run this to initilize your remla setup. It will make sure you have "
     "the correct dependencies installed, as well as the install mediamtx for "
@@ -339,7 +376,8 @@ def init():
 
     ####### Create an initial settings file #############
     _createSettingsFile()
-    interactivesetup()
+    configure_camera_hardware()
+    restore_runtime_storage_permissions()
     typer.echo("Wrapping up install...")
     subprocess.run(["sudo", "systemctl", "daemon-reload"])
     subprocess.run(["sudo", "systemctl", "restart", "remla.service"])
@@ -525,16 +563,14 @@ def _nginx():
     # homeDirectory.chmod(0o755)
 
 
-@app.command()
-def interactivesetup():
-    user = homeDirectory.owner()
+def configure_camera_hardware():
     message = "Note that remla currently only works with Raspberry Pi 4! If you are using a newer model, you will need do this manually."
     remlaPanel(message)
     (cont_int,) = (
         typer.confirm("Do you want to continue with interactive install?", default="y"),
     )
     if not cont_int:
-        return
+        return False
     allowedSensors = ["ov5647", "imx219", "imx477", "imx708", "imx519", "other"]
     sensorQuestionString = "Select which type of sensor you will be using [1-5]:\n"
     for i, sensor in enumerate(allowedSensors):
@@ -635,6 +671,8 @@ def interactivesetup():
         )
 
     else:
+        backup_path = bootConfigPath.with_name(f"{bootConfigPath.name}.remla-backup")
+        shutil.copy2(bootConfigPath, backup_path)
         with open(bootConfigPath, "r") as file:
             config = file.readlines()
 
@@ -680,8 +718,7 @@ def interactivesetup():
             )
 
         # Write the modified content back to the config file
-        with open(bootConfigPath, "w") as file:
-            file.writelines(config)
+        replace_boot_config(bootConfigPath, config)
 
         localip = _localip()
 
@@ -689,19 +726,11 @@ def interactivesetup():
         with open(settingsDirectory / "finalInfo.md", "w") as file:
             file.write(finalInfo)
 
-        subprocess.run(
-            ["sudo", "chown", "-R", f"{user}:{user}", f"{remoteLabsDirectory}"]
-        )
-        subprocess.run(
-            ["sudo", "chown", "-R", f"{user}:{user}", f"{settingsDirectory}"]
-        )
-
         message = Text(
-            f"You have finished installing remla, the remoteLabs control center.\n"
-            f"The next is for you to go one of:\n"
+            f"Camera boot settings are updated. Reboot before starting ReMLA.\n"
+            f"After reboot, verify the lab website at one of:\n"
             f"http://{hostname}.local:8080\n"
             f"http://{localip}:8080\n"
-            f"Follow the instructions there."
             f"If that doesn't work then run `remla finalinfo` to see it in the command line.",
             justify="center",
         )
@@ -709,6 +738,42 @@ def interactivesetup():
         panelDisplay(
             message, title="🎉🎉🎉 Congratulations! 🎉🎉🎉", border_style="green"
         )
+        return True
+
+    return False
+
+
+@app.command("interactivesetup", hidden=True)
+def interactivesetup():
+    camera_setup()
+
+
+def replace_boot_config(config_path: Path, lines: list[str]) -> None:
+    temporary_path = config_path.with_name(f".{config_path.name}.remla-tmp")
+    try:
+        with open(temporary_path, "w") as file:
+            file.writelines(lines)
+        os.replace(temporary_path, config_path)
+    except OSError:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def create_camera_setup_lock() -> bool:
+    try:
+        descriptor = os.open(cameraSetupLockPath, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        return False
+    with os.fdopen(descriptor, "w") as lock_file:
+        lock_file.write("Camera boot settings are being updated. Reboot after setup.\n")
+    return True
+
+
+def restore_runtime_storage_permissions() -> None:
+    for directory in (settingsDirectory, remoteLabsDirectory):
+        subprocess.run(["chown", "-R", "remla:remlausers", str(directory)], check=True)
+        subprocess.run(["find", str(directory), "-type", "d", "-exec", "chmod", "2770", "{}", "+"], check=True)
+        subprocess.run(["find", str(directory), "-type", "f", "-exec", "chmod", "0660", "{}", "+"], check=True)
 
 
 def _createSettingsFile():
@@ -822,6 +887,9 @@ def run(
         False, "--wstest", "-w", help="Runs echo test server"
     ),
 ):
+    if cameraSetupLockPath.exists():
+        alert("Camera boot configuration is pending. Reboot before starting ReMLA.")
+        raise typer.Abort()
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print("#" * 80)
     print(f"########{now.center(64)}########")

@@ -134,6 +134,7 @@
 - Service status: `uv run remla status`
 - Recover a faulted running service: `uv run remla recover`
 - Create a lab workspace link: `uv run remla link [PATH]`
+- Reconfigure camera boot hardware: `sudo uv run remla camera setup` (stops the service and requires a reboot).
 
 ## Safety checks for agents
 - Do not modify `/etc`, `/boot`, or systemd files unless explicitly asked.
