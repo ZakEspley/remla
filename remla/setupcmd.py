@@ -6,6 +6,7 @@ from rich import print as rprint
 from rich.prompt import Prompt, Confirm
 from remla.settings import *
 from remla.typerHelpers import *
+from remla.web_deployment import set_website_permissions
 import validators
 from remla.customvalidators import domainOrHostnameValidtor, portValidator
 from remla.systemHelpers import *
@@ -129,6 +130,7 @@ def _setup(labSettings:dict)->None:
         shutil.copy(setupDirectory / file, websiteJSDirectory)
 
     shutil.copytree(websiteDirectory, nginxWebsitePath, dirs_exist_ok=True)
+    set_website_permissions(nginxWebsitePath)
 
 @app.command()
 def lab(labfile: Annotated[str, typer.Argument()],

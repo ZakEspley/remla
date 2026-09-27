@@ -86,6 +86,13 @@ class PiInstallerTests(unittest.TestCase):
         self.assertIn('install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0644 "$WHEEL" "$wheel_asset"', content)
         self.assertIn('--force-reinstall "$wheel_asset"', content)
 
+    def test_installer_normalizes_nginx_web_root_permissions(self):
+        content = INSTALLER.read_text()
+
+        self.assertIn("chown -R root:root /var/www/remla", content)
+        self.assertIn("find /var/www/remla -type d -exec chmod 0755 {} +", content)
+        self.assertIn("find /var/www/remla -type f -exec chmod 0644 {} +", content)
+
 
 class PackageBuildTests(unittest.TestCase):
     def test_built_wheel_contains_runtime_assets(self):

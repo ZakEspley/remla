@@ -27,6 +27,14 @@ fail() {
     exit 1
 }
 
+normalize_nginx_web_root_permissions() {
+    if [[ -d /var/www/remla ]]; then
+        chown -R root:root /var/www/remla
+        find /var/www/remla -type d -exec chmod 0755 {} +
+        find /var/www/remla -type f -exec chmod 0644 {} +
+    fi
+}
+
 while (($#)); do
     case "$1" in
         --version)
@@ -178,6 +186,7 @@ systemctl enable pigpiod.service
 systemctl restart pigpiod.service
 
 if (( SKIP_INIT )); then
+    normalize_nginx_web_root_permissions
     printf 'ReMLA %s is installed. Run the installer again without --skip-init to configure this laboratory.\n' "$VERSION"
     exit 0
 fi
@@ -186,5 +195,6 @@ fi
 chown -R "$SERVICE_USER":remlausers /etc/remla /var/lib/remla/labs
 find /etc/remla /var/lib/remla/labs -type d -exec chmod 2770 {} +
 find /etc/remla /var/lib/remla/labs -type f -exec chmod 0660 {} +
+normalize_nginx_web_root_permissions
 
 printf 'ReMLA %s is installed and configured. Use `remla status` to check the service.\n' "$VERSION"

@@ -30,6 +30,7 @@ from remla.settings import *
 from remla.systemHelpers import *
 from remla.typerHelpers import *
 from remla.workspace import WorkspaceLinkError, create_workspace_link
+from remla.web_deployment import set_website_permissions
 from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
@@ -510,6 +511,7 @@ def _nginx():
         file.write(updatedHtml)
 
     shutil.copytree(websiteDirectory, nginxWebsitePath, dirs_exist_ok=True)
+    set_website_permissions(nginxWebsitePath)
 
     typer.echo("Making NGINX run at boot")
     echoResult(
