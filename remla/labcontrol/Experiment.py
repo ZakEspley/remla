@@ -579,7 +579,7 @@ class Experiment(object):
 
     async def _execute_device_method(self, device, method, params):
         if device.__class__.__name__ == "ArduCamMultiCamera" and method in {"camera", "cameraName"}:
-            print(f"Executing accepted camera command {method}/{params[0]}")
+            logging.info("Executing accepted camera command %s/%s", method, params[0])
         camera_switch = (
             method in {"camera", "cameraName"}
             and device.__class__.__name__ == "PiCamera2MultiCam"
