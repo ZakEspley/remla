@@ -41,8 +41,10 @@ legacy control-status alert immediately. This avoids requiring legacy clients
 to send a first frame before they can receive control state.
 
 After selection, every frame on the connection is JSON version `1.0.0`.
-Unsupported subprotocol offers are rejected during the WebSocket handshake;
-legacy framing is never inferred from invalid JSON.
+Clients that offer only unsupported subprotocols must close the connection. The
+server's current WebSocket library selects no subprotocol in that case, so
+clients must treat a missing selection as unsupported rather than fall back to
+legacy framing. Legacy framing is never inferred from invalid JSON.
 
 ## Commands
 
@@ -63,6 +65,9 @@ Only clients send `command` frames:
 `deviceName` and `commandName` identify the public backend capability.
 `parameters` is an object. Device topology, such as a PDU outlet powering an
 electrometer, is resolved by the backend and is not exposed to clients.
+For positional controller parsers, clients use `{"arguments": ["value"]}`.
+The special `Experiment` / `handoff` command accepts
+`{"choice": "continue"}` or `{"choice": "reset"}`.
 
 ## Results and errors
 
@@ -108,7 +113,7 @@ Only the server sends `event` frames. `payload.name` identifies the event and
 }
 ```
 
-Version 1 event names include `ownership.queue`, `ownership.handoff`,
+Version 1 event names include `message`, `command`, `ownership.queue`, `ownership.handoff`,
 `alert`, `state.snapshot`, `state.changed`, `operation.queued`,
 `operation.started`, `operation.completed`, `operation.failed`,
 `reset.started`, `reset.completed`, and `fault`.

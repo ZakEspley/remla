@@ -15,6 +15,57 @@ experiment_module = importlib.import_module("remla.labcontrol.Experiment")
 
 
 class ExperimentLifecycleTests(unittest.TestCase):
+    def test_json_subprotocol_alert_uses_a_protocol_event(self):
+        class WebSocket:
+            subprotocol = "remla-json-v1"
+
+            def __init__(self):
+                self.frames = []
+
+            async def send(self, frame):
+                self.frames.append(frame)
+
+        websocket = WebSocket()
+        experiment = experiment_module.Experiment("RemoteLabs")
+
+        asyncio.run(experiment.sendAlert(websocket, "Experiment/controlStatus/1,Ready"))
+
+        frame = experiment_module.json.loads(websocket.frames[0])
+        self.assertEqual(frame["type"], "event")
+        self.assertEqual(frame["payload"]["name"], "alert")
+        self.assertEqual(frame["payload"]["data"]["message"], "Experiment/controlStatus/1,Ready")
+
+    def test_json_command_without_ownership_returns_correlated_error(self):
+        class WebSocket:
+            subprotocol = "remla-json-v1"
+
+            def __init__(self):
+                self.frames = []
+
+            async def send(self, frame):
+                self.frames.append(frame)
+
+        websocket = WebSocket()
+        experiment = experiment_module.Experiment("RemoteLabs")
+        frame = experiment_module.json.dumps(
+            {
+                "meta": {"messageId": "request-id", "version": "1.0.0"},
+                "type": "command",
+                "payload": {
+                    "deviceName": "Camera",
+                    "commandName": "capture",
+                    "parameters": {},
+                },
+            }
+        )
+
+        asyncio.run(experiment.process_json_frame(frame, websocket))
+
+        result = experiment_module.json.loads(websocket.frames[0])
+        self.assertEqual(result["type"], "result")
+        self.assertEqual(result["meta"]["replyId"], "request-id")
+        self.assertEqual(result["payload"]["error"]["code"], "not_owner")
+
     def test_constructor_uses_the_configured_operation_policy(self):
         experiment = experiment_module.Experiment("RemoteLabs")
 

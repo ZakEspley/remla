@@ -6,8 +6,10 @@ import os
 import socket
 import threading
 import time
+import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import quote
@@ -38,6 +40,9 @@ class NoDeviceError(Exception):
 
 class CommandAdmissionError(Exception):
     pass
+
+
+JSON_SUBPROTOCOL = "remla-json-v1"
 
 
 def runMethod(device, method, params):
@@ -265,6 +270,9 @@ class Experiment(object):
                     "Experiment/controlStatus/0,You are connected but do not have control of the lab equipment.",
                 )
             async for command in websocket:
+                if self.uses_json_protocol(websocket):
+                    await self.process_json_frame(command, websocket)
+                    continue
                 if command.startswith("CONTROL/handoff/"):
                     await self.processControlCommand(command, websocket)
                 elif self.can_accept_commands(websocket):
@@ -279,6 +287,65 @@ class Experiment(object):
         finally:
             self.clients.remove(websocket)  # Remove client that closed connection
             await self.disconnect_client(websocket)
+
+    async def process_json_frame(self, frame, websocket):
+        try:
+            message = json.loads(frame)
+            message_id = message["meta"]["messageId"]
+            if message["type"] != "command":
+                raise ValueError("Only command frames are accepted from clients")
+            payload = message["payload"]
+            device_name = payload["deviceName"]
+            command_name = payload["commandName"]
+            parameters = payload.get("parameters", {})
+            if not isinstance(parameters, dict):
+                raise ValueError("parameters must be an object")
+        except (TypeError, KeyError, ValueError, json.JSONDecodeError) as error:
+            await self.send_json_result(websocket, None, 400, False, "invalid_parameters", str(error))
+            return
+        if not isinstance(message_id, str) or not message.get("meta", {}).get("version", "").startswith("1."):
+            await self.send_json_result(websocket, message_id if isinstance(message_id, str) else None, 400, False, "invalid_parameters", "Unsupported protocol version")
+            return
+
+        if device_name == "Experiment" and command_name == "handoff":
+            choice = parameters.get("choice")
+            if choice not in {"continue", "reset"}:
+                await self.send_json_result(websocket, message_id, 400, False, "invalid_parameters", "choice must be continue or reset")
+                return
+            accepted = await self.processControlCommand(f"CONTROL/handoff/{choice}", websocket)
+            if accepted:
+                await self.send_json_result(websocket, message_id, 200, True, message="Handoff choice accepted")
+            else:
+                await self.send_json_result(websocket, message_id, 403, False, "not_owner", "Handoff choice was not accepted")
+            return
+
+        if not self.can_accept_commands(websocket):
+            await self.send_json_result(websocket, message_id, 403, False, "not_owner", "You do not have control of the lab.")
+            return
+        if device_name not in self.devices:
+            await self.send_json_result(websocket, message_id, 404, False, "unknown_command", "Unknown device")
+            return
+
+        arguments = parameters.get("arguments")
+        if arguments is None:
+            arguments = list(parameters.values())
+        if not isinstance(arguments, list):
+            await self.send_json_result(websocket, message_id, 400, False, "invalid_parameters", "arguments must be a list")
+            return
+        try:
+            await self.runDeviceMethod(device_name, command_name, arguments, websocket)
+        except (AttributeError, ValueError) as error:
+            await self.send_json_result(websocket, message_id, 400, False, "invalid_parameters", str(error))
+            return
+        except asyncio.TimeoutError:
+            await self.enter_fault(f"Operation timed out: {device_name}/{command_name}")
+            await self.send_json_result(websocket, message_id, 500, False, "device_faulted", "Operation timed out")
+            return
+        except Exception:
+            logging.exception("JSON command failed: %s/%s", device_name, command_name)
+            await self.send_json_result(websocket, message_id, 500, False, "internal_error", "Command failed")
+            return
+        await self.send_json_result(websocket, message_id, 200, True, message="Command completed")
 
     def track_client_command_task(self, websocket, task):
         tasks = self._client_command_tasks.setdefault(websocket, set())
@@ -372,7 +439,7 @@ class Experiment(object):
             await self.sendAlert(
                 websocket, "Experiment/controlStatus/0,The experiment is not accepting control actions."
             )
-            return
+            return False
         try:
             _, _, choice = command.split("/", 2)
             self.ownership.choose_handoff(websocket, choice)
@@ -381,14 +448,14 @@ class Experiment(object):
                 websocket,
                 "Experiment/controlStatus/0,You do not have a pending control handoff.",
             )
-            return
+            return False
         self.cancel_handoff_timeout()
         if choice == "continue":
             self.activeClient = websocket
             await self.sendAlert(websocket, "Experiment/controlStatus/1,You have control of the lab equipment.")
-            return
+            return True
 
-        await self.complete_handoff_reset(
+        return await self.complete_handoff_reset(
             websocket,
             "Experiment/controlStatus/1,Reset complete. You have control of the lab equipment.",
             "handoff_choice",
@@ -640,7 +707,12 @@ class Experiment(object):
         print(f"Server started at ws://{self.host}:{self.port}")
         try:
             self.server = loop.run_until_complete(
-                websockets.serve(self.handleConnection, self.host, self.port)
+                websockets.serve(
+                    self.handleConnection,
+                    self.host,
+                    self.port,
+                    subprotocols=[JSON_SUBPROTOCOL],
+                )
             )
             loop.run_forever()
         finally:
@@ -657,15 +729,70 @@ class Experiment(object):
             )
             print(f"Failed to send message: {dataStr} - Connection was closed.")
 
+    def uses_json_protocol(self, websocket):
+        return getattr(websocket, "subprotocol", None) == JSON_SUBPROTOCOL
+
+    def json_event_frame(self, name, data):
+        return json.dumps(
+            {
+                "meta": {
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "version": "1.0.0",
+                    "messageId": str(uuid.uuid4()),
+                    "replyId": None,
+                },
+                "type": "event",
+                "payload": {"name": name, "data": data},
+            }
+        )
+
+    async def send_json_result(self, websocket, reply_id, status, ok, code=None, detail=None, message=None):
+        payload = {"status": status, "ok": ok}
+        if ok:
+            payload["message"] = message
+        else:
+            payload["error"] = {"code": code, "detail": detail}
+        frame = json.dumps(
+            {
+                "meta": {
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "version": "1.0.0",
+                    "messageId": str(uuid.uuid4()),
+                    "replyId": reply_id,
+                },
+                "type": "result",
+                "payload": payload,
+            }
+        )
+        await self.sendDataToClient(websocket, frame)
+
     async def sendMessage(self, websocket, message: str):
+        if self.uses_json_protocol(websocket):
+            await self.sendDataToClient(websocket, self.json_event_frame("message", {"message": message}))
+            return
         updatedMessage = f"MESSAGE: {message}"
         await self.sendDataToClient(websocket, updatedMessage)
 
     async def sendAlert(self, websocket, alertMsg: str):
+        if self.uses_json_protocol(websocket):
+            await self.sendDataToClient(
+                websocket,
+                self.json_event_frame(
+                    "alert",
+                    {"severity": "info", "title": "ReMLA", "message": alertMsg},
+                ),
+            )
+            return
         updatedAlertMsg = f"ALERT: {alertMsg}"
         await self.sendDataToClient(websocket, updatedAlertMsg)
 
     async def sendCommandToClient(self, websocket, command: str):
+        if self.uses_json_protocol(websocket):
+            if command.startswith("fault/"):
+                await self.sendDataToClient(websocket, self.json_event_frame("fault", {"message": command[6:]}))
+                return
+            await self.sendDataToClient(websocket, self.json_event_frame("command", {"command": command}))
+            return
         updatedCommand = f"COMMAND: {command}"
         await self.sendDataToClient(websocket, updatedCommand)
 
