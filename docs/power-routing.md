@@ -19,6 +19,9 @@ Providers implement `get_power_state` and `set_power_state`. A provider and
 every routed consumer must share one named lock group. ReMLA rejects invalid
 providers, targets, and lock assignments during startup.
 
+`PDUOutlet` refreshes its outlet status from the DLI provider before a toggle.
+If that read is unavailable or unknown, the toggle fails rather than guessing.
+
 `PowerConsumer.reset()` and `safe_stop()` turn its configured route off.
 Direct provider commands remain available for legacy and diagnostic use, but
 clients should command the named consumer instead of provider topology.

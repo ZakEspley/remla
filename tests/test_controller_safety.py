@@ -7,6 +7,18 @@ controllers = importlib.import_module("remla.labcontrol.Controllers")
 
 
 class ControllerSafeStopTests(unittest.TestCase):
+    def test_pdu_power_state_refreshes_from_provider_before_toggle(self):
+        pdu = object.__new__(controllers.PDUOutlet)
+        pdu.initParameters = {}
+        pdu.name = "PDU"
+        pdu.outlets = [5]
+        pdu.outletMap = {"Laser": 5}
+        pdu.state = {5: "Off"}
+
+        with mock.patch.object(controllers.dlipower.PowerSwitch, "status", return_value="ON"):
+            self.assertEqual(pdu.get_power_state("Laser"), "on")
+
+        self.assertEqual(pdu.state[5], "On")
     def test_configured_power_route_delegates_on_off_and_toggle(self):
         class Consumer(controllers.BaseController):
             deviceType = "controller"

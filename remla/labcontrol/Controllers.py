@@ -252,7 +252,13 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
         return outlet
 
     def get_power_state(self, target):
-        return self.state[self.resolve_power_target(target)]
+        outlet = self.resolve_power_target(target)
+        status = super().status(outlet)
+        normalized = str(status).lower()
+        if normalized not in {"on", "off"}:
+            raise RuntimeError(f"Unable to read power state for outlet '{target}'")
+        self.state[outlet] = normalized.title()
+        return normalized
 
     def set_power_state(self, target, state):
         outlet = self.resolve_power_target(target)
