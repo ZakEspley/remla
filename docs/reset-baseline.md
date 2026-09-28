@@ -10,6 +10,7 @@ The baseline is currently defined by each controller's reset contract and its
 lab YAML constructor settings:
 
 - `PDUOutlet` turns every configured outlet off.
+- `PowerConsumer` turns its configured provider route off.
 - `SingleGPIO` drives its output low.
 - `StepperI2C` returns to YAML `initialPosition` (default `0`) and releases
   its coils.

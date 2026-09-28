@@ -17,6 +17,7 @@
 - [x] Added opt-in `remla-json-v1` WebSocket subprotocol framing while preserving legacy WebSocket clients.
 - [x] Added loopback WebSocket compatibility coverage for legacy, JSON, and unsupported subprotocol clients.
 - [x] Added provider-routed binary power commands for configured controllers; configure consumers with YAML `power.provider` and `power.outlet`.
+- [x] Added `PowerConsumer` for standalone provider-backed targets such as diffrac2's Laser and Screen.
 - [x] Ran the diffrac2 development checkout's loopback protocol tests with the installed release Python environment; no hardware commands ran and the production service remained active.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 

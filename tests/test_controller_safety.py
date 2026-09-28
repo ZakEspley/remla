@@ -30,9 +30,23 @@ class ControllerSafeStopTests(unittest.TestCase):
             provider.set_power_state.call_args_list,
             [mock.call("instrument", "on"), mock.call("instrument", "off"), mock.call("instrument", "on")],
         )
+
+    def test_power_consumer_reset_and_safe_stop_turn_off_its_route(self):
+        provider = mock.Mock()
+        consumer = controllers.PowerConsumer("Laser")
+        consumer.configure_power_route(provider, "Laser")
+
+        consumer.reset()
+        consumer.safe_stop()
+
+        self.assertEqual(
+            provider.set_power_state.call_args_list,
+            [mock.call("Laser", "off"), mock.call("Laser", "off")],
+        )
     def test_every_concrete_controller_declares_safe_stop(self):
         controller_types = [
             controllers.PDUOutlet,
+            controllers.PowerConsumer,
             controllers.Plug,
             controllers.StepperSimple,
             controllers.DCMotorI2C,

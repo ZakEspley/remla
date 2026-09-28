@@ -144,6 +144,7 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
     def power_on(self, params):
         provider, target = self._power_route()
         provider.set_power_state(target, "on")
+        self.state["power"] = "on"
         return "on"
 
     def power_off_parser(self, params):
@@ -154,6 +155,7 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
     def power_off(self, params):
         provider, target = self._power_route()
         provider.set_power_state(target, "off")
+        self.state["power"] = "off"
         return "off"
 
     def power_toggle_parser(self, params):
@@ -166,6 +168,7 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
         state = provider.get_power_state(target)
         next_state = "off" if str(state).lower() == "on" else "on"
         provider.set_power_state(target, next_state)
+        self.state["power"] = next_state
         return next_state
 
     @abstractmethod
@@ -181,6 +184,22 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
 
     def setState(self, state):
         self.state = state
+
+
+class PowerConsumer(BaseController):
+    """A named lab target powered through a configured provider."""
+
+    deviceType = "controller"
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.state = {"power": "unknown"}
+
+    def reset(self):
+        self.power_off([])
+
+    def safe_stop(self):
+        self.power_off([])
 
 
 class PDUOutlet(dlipower.PowerSwitch, BaseController):
