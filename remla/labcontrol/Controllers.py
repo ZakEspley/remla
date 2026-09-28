@@ -88,6 +88,7 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
         self.name = name
         self.experiment = None
         self.state = {}
+        self.power_route = None
         typer.echo(f"Initialized {name} base controller")
 
     @property
@@ -122,6 +123,50 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
             )
 
         return method(params)
+
+    def configure_power_route(self, provider, target):
+        if not callable(getattr(provider, "get_power_state", None)) or not callable(
+            getattr(provider, "set_power_state", None)
+        ):
+            raise TypeError(f"Power provider for '{self.name}' does not support power routing")
+        self.power_route = (provider, target)
+
+    def _power_route(self):
+        if self.power_route is None:
+            raise RuntimeError(f"Power is not configured for '{self.name}'")
+        return self.power_route
+
+    def power_on_parser(self, params):
+        if params not in ([], [""]):
+            raise ArgumentNumberError(len(params), 0, "power_on")
+        return None
+
+    def power_on(self, params):
+        provider, target = self._power_route()
+        provider.set_power_state(target, "on")
+        return "on"
+
+    def power_off_parser(self, params):
+        if params not in ([], [""]):
+            raise ArgumentNumberError(len(params), 0, "power_off")
+        return None
+
+    def power_off(self, params):
+        provider, target = self._power_route()
+        provider.set_power_state(target, "off")
+        return "off"
+
+    def power_toggle_parser(self, params):
+        if params not in ([], [""]):
+            raise ArgumentNumberError(len(params), 0, "power_toggle")
+        return None
+
+    def power_toggle(self, params):
+        provider, target = self._power_route()
+        state = provider.get_power_state(target)
+        next_state = "off" if str(state).lower() == "on" else "on"
+        provider.set_power_state(target, next_state)
+        return next_state
 
     @abstractmethod
     def reset(self):
@@ -177,6 +222,27 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
     def off(self, outletNumber):
         super().off(outletNumber)
         self.state[outletNumber] = "Off"
+
+    def resolve_power_target(self, target):
+        try:
+            outlet = int(target)
+        except (TypeError, ValueError):
+            outlet = self.outletMap.get(target)
+        if outlet not in self.outlets:
+            raise ValueError(f"Unknown power outlet '{target}' for '{self.name}'")
+        return outlet
+
+    def get_power_state(self, target):
+        return self.state[self.resolve_power_target(target)]
+
+    def set_power_state(self, target, state):
+        outlet = self.resolve_power_target(target)
+        if state == "on":
+            self.on(outlet)
+        elif state == "off":
+            self.off(outlet)
+        else:
+            raise ValueError(f"Unsupported power state '{state}'")
 
     def on_parser(self, params):
         if len(params) != 1:
@@ -247,6 +313,21 @@ class Plug(tp.TPLinkSmartDevice, BaseController):
         if len(params) != 1:
             raise ArgumentNumberError(len(params), 1, "setRelay")
         return params[0]
+
+    def resolve_power_target(self, target):
+        if target not in (None, "self", self.name):
+            raise ValueError(f"Plug '{self.name}' does not have outlet '{target}'")
+        return target
+
+    def get_power_state(self, target):
+        self.resolve_power_target(target)
+        return self.state["relayState"]
+
+    def set_power_state(self, target, state):
+        self.resolve_power_target(target)
+        if state not in {"on", "off"}:
+            raise ValueError(f"Unsupported power state '{state}'")
+        self.setRelay(state.upper())
 
     # def cleanup(self):
     #     super().close()
@@ -2617,10 +2698,10 @@ class PWMChannel(BaseController):
         self.pwm.start(self.dutyCycle)
         self.state = {}
 
-    def power(self, dutyCycle):
+    def set_duty_cycle(self, dutyCycle):
         self.pwm.ChangeDutyCycle(dutyCycle)
 
-    def power_parser(self, params):
+    def set_duty_cycle_parser(self, params):
         if len(params) != 1:
             raise ArgumentNumberError(len(params), 1, "power")
         dutyCycle = float(params[0])
@@ -2629,6 +2710,12 @@ class PWMChannel(BaseController):
                 self.name, "power", dutyCycle, allowed="0 <= dutyCycle <= 100"
             )
         return dutyCycle
+
+    def power(self, dutyCycle):
+        return self.set_duty_cycle(dutyCycle)
+
+    def power_parser(self, params):
+        return self.set_duty_cycle_parser(params)
 
     def reset(self):
         self.pwm.ChangeDutyCycle(self.defaultDutyCycle)

@@ -7,6 +7,29 @@ controllers = importlib.import_module("remla.labcontrol.Controllers")
 
 
 class ControllerSafeStopTests(unittest.TestCase):
+    def test_configured_power_route_delegates_on_off_and_toggle(self):
+        class Consumer(controllers.BaseController):
+            deviceType = "controller"
+
+            def reset(self):
+                pass
+
+            def safe_stop(self):
+                pass
+
+        provider = mock.Mock()
+        provider.get_power_state.return_value = "off"
+        consumer = Consumer("Instrument")
+        consumer.configure_power_route(provider, "instrument")
+
+        consumer.power_on([""])
+        consumer.power_off([])
+        consumer.power_toggle([])
+
+        self.assertEqual(
+            provider.set_power_state.call_args_list,
+            [mock.call("instrument", "on"), mock.call("instrument", "off"), mock.call("instrument", "on")],
+        )
     def test_every_concrete_controller_declares_safe_stop(self):
         controller_types = [
             controllers.PDUOutlet,

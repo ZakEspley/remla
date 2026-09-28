@@ -84,7 +84,8 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
 
         # cls = globals()[deviceDetails['type']]
         cls = getattr(Controllers, deviceDetails['type'])
-        initArgs = {k: v for k, v in deviceDetails.items() if k not in ['type', 'name']}
+        power_config = deviceDetails.get("power")
+        initArgs = {k: v for k, v in deviceDetails.items() if k not in ['type', 'name', 'power']}
         validate_device_arguments(deviceName, cls, initArgs)
 
         # Resolve dependencies for each initialization argument
@@ -92,8 +93,29 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
             if isinstance(value, str) and value in deviceData:
                 initArgs[arg] = resolveDependencies(value)
 
+        provider = None
+        target = None
+        if power_config is not None:
+            if not isinstance(power_config, dict):
+                raise TypeError(f"Device '{deviceName}' power configuration must be an object")
+            provider_name = power_config.get("provider")
+            target = power_config.get("outlet")
+            if not isinstance(provider_name, str) or target is None:
+                raise TypeError(f"Device '{deviceName}' power configuration requires provider and outlet")
+            if provider_name not in deviceData:
+                raise ValueError(f"Device '{deviceName}' references unknown power provider '{provider_name}'")
+            provider = resolveDependencies(provider_name)
+            if hasattr(provider, "resolve_power_target"):
+                provider.resolve_power_target(target)
+            if not callable(getattr(provider, "get_power_state", None)) or not callable(
+                getattr(provider, "set_power_state", None)
+            ):
+                raise TypeError(f"Power provider '{provider_name}' does not support power routing")
+
         # Create the device instance and add to the devices dictionary
         device = cls(name=deviceName, **initArgs)
+        if power_config is not None:
+            device.configure_power_route(provider, target)
         devices[deviceName] = device
 
         # Remove device from inProgress set

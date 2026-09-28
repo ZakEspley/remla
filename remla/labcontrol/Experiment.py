@@ -207,6 +207,16 @@ class Experiment(object):
                 "Devices must belong to exactly one lock group: "
                 + ", ".join(missing_devices)
             )
+        for device in self.devices.values():
+            power_route = getattr(device, "power_route", None)
+            if power_route is None:
+                continue
+            provider, _ = power_route
+            if self.lockMapping[device.name] != self.lockMapping.get(provider.name):
+                raise ValueError(
+                    f"Power consumer '{device.name}' and provider '{provider.name}' "
+                    "must share a lock group"
+                )
 
     def recallState(self):
         return self.load_persisted_state()
