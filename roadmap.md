@@ -32,6 +32,7 @@
 5. [x] Implement anonymous JSON queue-presence broadcasts with recipient-specific position, queue count, and active-owner presence on connect, disconnect, promotion, and handoff changes.
 6. [x] Run hardware-free regression tests, perform loopback and Pi development-service smoke tests without unsolicited hardware commands, and document deployment/rollback. Frontend adoption and release packaging remain separate follow-up work.
 - [x] Verified diffrac2's development service loads the named secret store and `sudo python -m remla.main secrets list` reveals only `asdipdu-password`, never its value.
+- [x] Bound PDU outlet commands to one request without inherited status follow-ups and removed duplicate `PowerConsumer` provider resets; await lockout expiry before live deployment validation.
 - [x] Ran the diffrac2 development checkout's loopback protocol tests with the installed release Python environment; no hardware commands ran and the production service remained active.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 

@@ -22,6 +22,7 @@ providers, targets, and lock assignments during startup.
 `PDUOutlet` refreshes its outlet status from the DLI provider before a toggle.
 If that read is unavailable or unknown, the toggle fails rather than guessing.
 
-`PowerConsumer.reset()` and `safe_stop()` turn its configured route off.
-Direct provider commands remain available for legacy and diagnostic use, but
+Providers own the physical baseline reset. `PowerConsumer.reset()` and
+`safe_stop()` only clear their cached state, avoiding duplicate provider requests
+during a lab reset. Direct provider commands remain available for legacy and diagnostic use, but
 clients should command the named consumer instead of provider topology.

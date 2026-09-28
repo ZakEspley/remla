@@ -19,6 +19,21 @@ class ControllerSafeStopTests(unittest.TestCase):
             self.assertEqual(pdu.get_power_state("Laser"), "on")
 
         self.assertEqual(pdu.state[5], "On")
+
+    def test_pdu_power_command_does_not_issue_status_followup(self):
+        pdu = object.__new__(controllers.PDUOutlet)
+        pdu.initParameters = {}
+        pdu.name = "PDU"
+        pdu.outlets = [5]
+        pdu.outletMap = {"Laser": 5}
+        pdu.state = {5: "Off"}
+        pdu.retries = 3
+
+        with mock.patch.object(controllers.dlipower.PowerSwitch, "geturl", return_value=b"ok") as geturl:
+            pdu.set_power_state("Laser", "on")
+
+        geturl.assert_called_once_with("outlet?5=ON")
+        self.assertEqual(pdu.retries, 3)
     def test_configured_power_route_delegates_on_off_and_toggle(self):
         class Consumer(controllers.BaseController):
             deviceType = "controller"
@@ -43,7 +58,7 @@ class ControllerSafeStopTests(unittest.TestCase):
             [mock.call("instrument", "on"), mock.call("instrument", "off"), mock.call("instrument", "on")],
         )
 
-    def test_power_consumer_reset_and_safe_stop_turn_off_its_route(self):
+    def test_power_consumer_reset_and_safe_stop_do_not_duplicate_provider_reset(self):
         provider = mock.Mock()
         consumer = controllers.PowerConsumer("Laser")
         consumer.configure_power_route(provider, "Laser")
@@ -51,10 +66,8 @@ class ControllerSafeStopTests(unittest.TestCase):
         consumer.reset()
         consumer.safe_stop()
 
-        self.assertEqual(
-            provider.set_power_state.call_args_list,
-            [mock.call("Laser", "off"), mock.call("Laser", "off")],
-        )
+        provider.set_power_state.assert_not_called()
+        self.assertEqual(consumer.state["power"], "unknown")
     def test_every_concrete_controller_declares_safe_stop(self):
         controller_types = [
             controllers.PDUOutlet,

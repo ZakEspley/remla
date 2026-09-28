@@ -196,10 +196,10 @@ class PowerConsumer(BaseController):
         self.state = {"power": "unknown"}
 
     def reset(self):
-        self.power_off([])
+        self.state["power"] = "unknown"
 
     def safe_stop(self):
-        self.power_off([])
+        self.state["power"] = "unknown"
 
 
 class PDUOutlet(dlipower.PowerSwitch, BaseController):
@@ -235,12 +235,22 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
         # self.login()
 
     def on(self, outletNumber):
-        super().on(outletNumber)
+        self._set_outlet(outletNumber, "ON")
         self.state[outletNumber] = "On"
 
     def off(self, outletNumber):
-        super().off(outletNumber)
+        self._set_outlet(outletNumber, "OFF")
         self.state[outletNumber] = "Off"
+
+    def _set_outlet(self, outletNumber, state):
+        retries = self.retries
+        self.retries = 1
+        try:
+            response = super().geturl(f"outlet?{outletNumber}={state}")
+        finally:
+            self.retries = retries
+        if not response:
+            raise RuntimeError(f"Unable to set PDU outlet {outletNumber} {state.lower()}")
 
     def resolve_power_target(self, target):
         try:
