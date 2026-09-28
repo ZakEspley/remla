@@ -35,6 +35,8 @@
 - [x] Bound PDU outlet commands to one request without inherited status follow-ups and removed duplicate `PowerConsumer` provider resets; await lockout expiry before live deployment validation.
 - [x] Operator validated explicit Laser and Screen on/off commands against diffrac2's reduced-request development service after the PDU lockout cleared.
 - [x] Operator validated one page refresh restores control without PDU lockout, and legacy Laser/Screen UI controls continue to work on diffrac2's reduced-request development service.
+- [x] Removed departed owners from ownership before draining their work; drain failures now fault without leaving a ghost active owner and notify any pending handoff user.
+- [x] Queue connections arriving during departed-work draining and promote them only after reset/handoff readiness, preventing new active ownership during unsafe teardown.
 - [x] Ran the diffrac2 development checkout's loopback protocol tests with the installed release Python environment; no hardware commands ran and the production service remained active.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 

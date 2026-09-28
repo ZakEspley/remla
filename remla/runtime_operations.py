@@ -62,6 +62,14 @@ class OwnershipManager:
             return
         self.waiting_users.append(user_id)
 
+    def enqueue(self, user_id: str) -> None:
+        if user_id not in (self.active_owner, self.handoff_user) and user_id not in self.waiting_users:
+            self.waiting_users.append(user_id)
+
+    def promote_waiting_user(self) -> None:
+        if self.active_owner is None and self.handoff_user is None:
+            self._promote_next_user()
+
     def disconnect(self, user_id: str) -> None:
         if user_id in self.waiting_users:
             self.waiting_users.remove(user_id)

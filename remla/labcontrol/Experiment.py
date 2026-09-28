@@ -268,7 +268,10 @@ class Experiment(object):
             return
         print("Connection!:", websocket, path)
         self.clients.append(websocket)  # Track all clients by their WebSocket
-        self.ownership.connect(websocket)
+        if self._runtime_state == "ready":
+            self.ownership.connect(websocket)
+        else:
+            self.ownership.enqueue(websocket)
         try:
             if self.can_accept_commands(websocket):
                 self.activeClient = websocket
@@ -390,12 +393,26 @@ class Experiment(object):
         was_handoff_user = websocket == self.ownership.handoff_user
         if was_active_owner:
             self.activeClient = None
-            await self.drain_owner_operations(websocket)
+
+            self._runtime_state = "draining"
 
         previous_handoff_user = self.ownership.handoff_user
         self.ownership.disconnect(websocket)
         await self.publish_queue_state()
         self.activeClient = self.ownership.active_owner
+        if was_active_owner:
+            try:
+                await self.drain_owner_operations(websocket)
+            except Exception as error:
+                await self.enter_fault(f"Owner disconnect drain failed: {error}")
+                if self.ownership.handoff_user is not None:
+                    await self.sendAlert(
+                        self.ownership.handoff_user,
+                        "Experiment/controlStatus/0,Lab faulted while the previous user disconnected.",
+                    )
+                return
+            if self.ownership.handoff_user is not None:
+                self._runtime_state = "ready"
         if (
             (was_active_owner or was_handoff_user)
             and self.ownership.active_owner is None
@@ -422,6 +439,9 @@ class Experiment(object):
             await self.enter_fault(f"Owner disconnect reset failed: {error}")
             return False
         self._runtime_state = "ready"
+        self.ownership.promote_waiting_user()
+        if self.ownership.handoff_user is not None:
+            await self.notify_handoff_user()
         return True
 
     async def drain_owner_operations(self, owner_id):

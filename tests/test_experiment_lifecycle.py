@@ -722,6 +722,21 @@ class ExperimentHandoffTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ExperimentOwnerDrainTests(unittest.IsolatedAsyncioTestCase):
+    async def test_drain_failure_removes_owner_before_faulting_handoff(self):
+        experiment = experiment_module.Experiment("RemoteLabs")
+        experiment.ownership.connect("owner")
+        experiment.ownership.connect("next")
+        experiment.drain_owner_operations = mock.AsyncMock(side_effect=RuntimeError("stuck"))
+        experiment.enter_fault = mock.AsyncMock()
+        experiment.sendAlert = mock.AsyncMock()
+
+        await experiment.disconnect_client("owner")
+
+        self.assertIsNone(experiment.ownership.active_owner)
+        self.assertEqual(experiment.ownership.handoff_user, "next")
+        experiment.enter_fault.assert_awaited_once()
+        experiment.sendAlert.assert_awaited_once()
+
     async def test_owner_disconnect_without_successor_resets_all_devices(self):
         experiment = experiment_module.Experiment("RemoteLabs")
         controller = mock.Mock(deviceType="controller")
@@ -792,8 +807,8 @@ class ExperimentOwnerDrainTests(unittest.IsolatedAsyncioTestCase):
         disconnect_task = asyncio.create_task(experiment.disconnect_client("owner"))
         await asyncio.sleep(0)
 
-        self.assertEqual(experiment.ownership.active_owner, "owner")
-        self.assertIsNone(experiment.ownership.handoff_user)
+        self.assertIsNone(experiment.ownership.active_owner)
+        self.assertEqual(experiment.ownership.handoff_user, "next")
 
         allow_completion.set()
         await command_task
