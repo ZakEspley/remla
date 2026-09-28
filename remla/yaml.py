@@ -1,4 +1,6 @@
 from collections import defaultdict
+import os
+import re
 from pathlib import Path, PosixPath, PurePosixPath, PurePath
 from typing import Any, List
 
@@ -15,6 +17,24 @@ yaml = YAML(typ='safe')
 # yaml.preserve_quotes = True  # Preserve quotes style
 yaml.indent(mapping=2, sequence=4, offset=2)  # Set indentation, optional
 yaml.default_flow_style = False
+
+ENVIRONMENT_REFERENCE = re.compile(r"^\$\{(REMLA_[A-Z0-9_]+)\}$")
+
+
+def resolve_environment_reference(value, device_name, option_name):
+    if not isinstance(value, str):
+        return value
+    match = ENVIRONMENT_REFERENCE.fullmatch(value)
+    if match is None:
+        return value
+    variable_name = match.group(1)
+    resolved = os.environ.get(variable_name)
+    if resolved is None:
+        raise ValueError(
+            f"Device '{device_name}' requires environment variable '{variable_name}' "
+            f"for option '{option_name}'"
+        )
+    return resolved
 # yaml.allow_unicode = True
 
 # Used to convert pathLib paths too yml files and vice versa.
@@ -85,7 +105,11 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
         # cls = globals()[deviceDetails['type']]
         cls = getattr(Controllers, deviceDetails['type'])
         power_config = deviceDetails.get("power")
-        initArgs = {k: v for k, v in deviceDetails.items() if k not in ['type', 'name', 'power']}
+        initArgs = {
+            key: resolve_environment_reference(value, deviceName, key)
+            for key, value in deviceDetails.items()
+            if key not in ['type', 'name', 'power']
+        }
         validate_device_arguments(deviceName, cls, initArgs)
 
         # Resolve dependencies for each initialization argument

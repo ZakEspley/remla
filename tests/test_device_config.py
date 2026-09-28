@@ -1,11 +1,24 @@
 import unittest
 from unittest import mock
+from unittest import mock
 
 from remla.device_config import validate_device_arguments
 from remla.labcontrol.Controllers import StepperI2C
+from remla.yaml import resolve_environment_reference
 
 
 class DeviceConfigTests(unittest.TestCase):
+    def test_resolves_exact_environment_reference(self):
+        with mock.patch.dict("os.environ", {"REMLA_PDU_PASSWORD": "secret"}, clear=True):
+            self.assertEqual(
+                resolve_environment_reference("${REMLA_PDU_PASSWORD}", "PDU", "password"),
+                "secret",
+            )
+
+    def test_missing_environment_reference_is_rejected_without_value_echo(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "REMLA_PDU_PASSWORD"):
+                resolve_environment_reference("${REMLA_PDU_PASSWORD}", "PDU", "password")
     def test_reports_all_unsupported_options(self):
         class Camera:
             def __init__(self, name, numCameras, streamPath="cam"):
