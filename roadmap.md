@@ -27,10 +27,10 @@
 
 1. [ ] Restore the in-progress JSON state-event branch to a fully tested baseline before layering further behavior.
 2. [x] Make `PDUOutlet` refresh outlet state from the provider for `get_power_state()` and `power_toggle`; return a safe command error when state cannot be read.
-3. [ ] Replace PDU credentials in lab YAML with explicit environment references; load root-owned service secrets through systemd, test missing-secret failures, and remove credential-bearing configuration copies after migration. Credential rotation follows separately.
-4. [ ] Implement JSON state revisions, initial snapshots, post-success state changes, and snapshot publication after reset, recovery, and handoff. Do not expose secrets, raw configuration, operation owners, or internal paths.
-5. [ ] Implement anonymous JSON queue-presence broadcasts with recipient-specific position, queue count, and active-owner presence on connect, disconnect, promotion, and handoff changes.
-6. [ ] Run hardware-free regression tests, perform loopback and Pi development-service smoke tests without unsolicited hardware commands, and document deployment/rollback. Frontend adoption and release packaging remain separate follow-up work.
+3. [x] Replace PDU credentials in lab YAML with explicit environment references; load root-owned service secrets through systemd, test missing-secret failures, and remove credential-bearing configuration copies after migration. Credential rotation follows separately.
+4. [x] Implement JSON state revisions, initial snapshots, post-success state changes, and snapshot publication after reset, recovery, and handoff. Do not expose secrets, raw configuration, operation owners, or internal paths.
+5. [x] Implement anonymous JSON queue-presence broadcasts with recipient-specific position, queue count, and active-owner presence on connect, disconnect, promotion, and handoff changes.
+6. [x] Run hardware-free regression tests, perform loopback and Pi development-service smoke tests without unsolicited hardware commands, and document deployment/rollback. Frontend adoption and release packaging remain separate follow-up work.
 - [x] Ran the diffrac2 development checkout's loopback protocol tests with the installed release Python environment; no hardware commands ran and the production service remained active.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
