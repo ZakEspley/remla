@@ -250,6 +250,11 @@ class Experiment(object):
         self.initializedStates = True
 
     async def handleConnection(self, websocket, path):
+        request_headers = getattr(websocket, "request_headers", {})
+        requested_subprotocol = request_headers.get("Sec-WebSocket-Protocol")
+        if requested_subprotocol and websocket.subprotocol is None:
+            await websocket.close(code=1002, reason="Unsupported WebSocket subprotocol")
+            return
         print("Connection!:", websocket, path)
         self.clients.append(websocket)  # Track all clients by their WebSocket
         self.ownership.connect(websocket)
@@ -303,8 +308,13 @@ class Experiment(object):
         except (TypeError, KeyError, ValueError, json.JSONDecodeError) as error:
             await self.send_json_result(websocket, None, 400, False, "invalid_parameters", str(error))
             return
-        if not isinstance(message_id, str) or not message.get("meta", {}).get("version", "").startswith("1."):
-            await self.send_json_result(websocket, message_id if isinstance(message_id, str) else None, 400, False, "invalid_parameters", "Unsupported protocol version")
+        try:
+            uuid.UUID(message_id)
+        except (TypeError, ValueError, AttributeError):
+            await self.send_json_result(websocket, None, 400, False, "invalid_parameters", "messageId must be a UUID")
+            return
+        if not message.get("meta", {}).get("version", "").startswith("1."):
+            await self.send_json_result(websocket, message_id, 400, False, "invalid_parameters", "Unsupported protocol version")
             return
 
         if device_name == "Experiment" and command_name == "handoff":
@@ -341,7 +351,10 @@ class Experiment(object):
             await self.enter_fault(f"Operation timed out: {device_name}/{command_name}")
             await self.send_json_result(websocket, message_id, 500, False, "device_faulted", "Operation timed out")
             return
-        except Exception:
+        except Exception as error:
+            if error.__class__.__name__ in {"ArgumentError", "ArgumentNumberError"}:
+                await self.send_json_result(websocket, message_id, 400, False, "invalid_parameters", str(error))
+                return
             logging.exception("JSON command failed: %s/%s", device_name, command_name)
             await self.send_json_result(websocket, message_id, 500, False, "internal_error", "Command failed")
             return

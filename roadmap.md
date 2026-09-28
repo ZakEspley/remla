@@ -15,6 +15,7 @@
 - [x] Completed a read-only architecture, packaging, protocol, and runtime-lifecycle assessment (2026-08-29).
 - [x] Defined JSON protocol version 1 with opt-in WebSocket subprotocol negotiation, correlated command results, and named events in `docs/protocol.md`.
 - [x] Added opt-in `remla-json-v1` WebSocket subprotocol framing while preserving legacy WebSocket clients.
+- [x] Added loopback WebSocket compatibility coverage for legacy, JSON, and unsupported subprotocol clients.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
 ## Current runtime defects to remove

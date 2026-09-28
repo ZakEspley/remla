@@ -41,10 +41,10 @@ legacy control-status alert immediately. This avoids requiring legacy clients
 to send a first frame before they can receive control state.
 
 After selection, every frame on the connection is JSON version `1.0.0`.
-Clients that offer only unsupported subprotocols must close the connection. The
-server's current WebSocket library selects no subprotocol in that case, so
-clients must treat a missing selection as unsupported rather than fall back to
-legacy framing. Legacy framing is never inferred from invalid JSON.
+Clients that offer only unsupported subprotocols are closed by the server. The
+server's current WebSocket library selects no subprotocol in that case, so the
+connection handler closes it rather than falling back to legacy framing. Legacy
+framing is never inferred from invalid JSON.
 
 ## Commands
 

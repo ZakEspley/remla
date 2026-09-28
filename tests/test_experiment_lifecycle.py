@@ -33,6 +33,8 @@ class ExperimentLifecycleTests(unittest.TestCase):
         frame = experiment_module.json.loads(websocket.frames[0])
         self.assertEqual(frame["type"], "event")
         self.assertEqual(frame["payload"]["name"], "alert")
+        self.assertEqual(frame["payload"]["data"]["severity"], "info")
+        self.assertEqual(frame["payload"]["data"]["title"], "ReMLA")
         self.assertEqual(frame["payload"]["data"]["message"], "Experiment/controlStatus/1,Ready")
 
     def test_json_command_without_ownership_returns_correlated_error(self):
@@ -49,7 +51,7 @@ class ExperimentLifecycleTests(unittest.TestCase):
         experiment = experiment_module.Experiment("RemoteLabs")
         frame = experiment_module.json.dumps(
             {
-                "meta": {"messageId": "request-id", "version": "1.0.0"},
+                "meta": {"messageId": "550e8400-e29b-41d4-a716-446655440000", "version": "1.0.0"},
                 "type": "command",
                 "payload": {
                     "deviceName": "Camera",
@@ -63,8 +65,42 @@ class ExperimentLifecycleTests(unittest.TestCase):
 
         result = experiment_module.json.loads(websocket.frames[0])
         self.assertEqual(result["type"], "result")
-        self.assertEqual(result["meta"]["replyId"], "request-id")
+        self.assertEqual(result["meta"]["replyId"], "550e8400-e29b-41d4-a716-446655440000")
         self.assertEqual(result["payload"]["error"]["code"], "not_owner")
+
+
+class ExperimentProtocolLoopbackTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.experiment = experiment_module.Experiment("RemoteLabs")
+        self.experiment._runtime_state = "ready"
+        self.server = await experiment_module.websockets.serve(
+            self.experiment.handleConnection,
+            "127.0.0.1",
+            0,
+            subprotocols=[experiment_module.JSON_SUBPROTOCOL],
+        )
+        self.port = self.server.sockets[0].getsockname()[1]
+
+    async def asyncTearDown(self):
+        self.server.close()
+        await self.server.wait_closed()
+
+    async def test_legacy_and_json_clients_receive_their_selected_framing(self):
+        uri = f"ws://127.0.0.1:{self.port}"
+        async with experiment_module.websockets.connect(uri) as legacy_client:
+            self.assertTrue((await legacy_client.recv()).startswith("ALERT: "))
+        async with experiment_module.websockets.connect(
+            uri, subprotocols=[experiment_module.JSON_SUBPROTOCOL]
+        ) as json_client:
+            frame = experiment_module.json.loads(await json_client.recv())
+        self.assertEqual(frame["type"], "event")
+        self.assertEqual(frame["payload"]["name"], "alert")
+
+    async def test_unknown_subprotocol_is_closed_before_legacy_framing(self):
+        uri = f"ws://127.0.0.1:{self.port}"
+        async with experiment_module.websockets.connect(uri, subprotocols=["unknown-v1"]) as client:
+            with self.assertRaises(experiment_module.websockets.exceptions.ConnectionClosed):
+                await client.recv()
 
     def test_constructor_uses_the_configured_operation_policy(self):
         experiment = experiment_module.Experiment("RemoteLabs")
