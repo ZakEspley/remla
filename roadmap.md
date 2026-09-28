@@ -16,7 +16,7 @@
 - [x] Defined JSON protocol version 1 with opt-in WebSocket subprotocol negotiation, correlated command results, and named events in `docs/protocol.md`.
 - [x] Added opt-in `remla-json-v1` WebSocket subprotocol framing while preserving legacy WebSocket clients.
 - [x] Added loopback WebSocket compatibility coverage for legacy, JSON, and unsupported subprotocol clients.
-- [ ] Provision a non-hardware Python environment in the diffrac2 development checkout before Pi-side protocol smoke tests; the production service remains on the installed release.
+- [x] Ran the diffrac2 development checkout's loopback protocol tests with the installed release Python environment; no hardware commands ran and the production service remained active.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
 ## Current runtime defects to remove
