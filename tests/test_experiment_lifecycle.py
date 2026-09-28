@@ -15,6 +15,32 @@ experiment_module = importlib.import_module("remla.labcontrol.Experiment")
 
 
 class ExperimentLifecycleTests(unittest.TestCase):
+    def test_json_snapshot_and_queue_state_are_recipient_safe(self):
+        class WebSocket:
+            subprotocol = "remla-json-v1"
+
+            def __init__(self):
+                self.frames = []
+
+            async def send(self, frame):
+                self.frames.append(frame)
+
+        websocket = WebSocket()
+        waiting_user = object()
+        experiment = experiment_module.Experiment("RemoteLabs")
+        experiment.devices = {"Laser": mock.Mock(getState=mock.Mock(return_value={"power": "on"}))}
+        experiment.clients.append(websocket)
+        experiment.ownership.active_owner = object()
+        experiment.ownership.waiting_users = [waiting_user, websocket]
+
+        asyncio.run(experiment.send_state_snapshot(websocket))
+        asyncio.run(experiment.publish_queue_state())
+
+        snapshot = experiment_module.json.loads(websocket.frames[0])
+        queue = experiment_module.json.loads(websocket.frames[1])
+        self.assertEqual(snapshot["payload"]["name"], "state.snapshot")
+        self.assertEqual(snapshot["payload"]["data"]["devices"]["Laser"], {"power": "on"})
+        self.assertEqual(queue["payload"]["data"], {"waitingCount": 2, "hasActiveOwner": True, "position": 2})
     def test_json_subprotocol_alert_uses_a_protocol_event(self):
         class WebSocket:
             subprotocol = "remla-json-v1"

@@ -131,6 +131,7 @@ class Experiment(object):
         self._shutdown_future = None
         self._runtime_state = "new"
         self.last_fault = None
+        self.state_revision = 0
         self.logPath = logsDirectory / f"{self.name}.log"
 
     def initialize_runtime(self):
@@ -284,6 +285,8 @@ class Experiment(object):
                     websocket,
                     "Experiment/controlStatus/0,You are connected but do not have control of the lab equipment.",
                 )
+            await self.send_state_snapshot(websocket)
+            await self.publish_queue_state()
             async for command in websocket:
                 if self.uses_json_protocol(websocket):
                     await self.process_json_frame(command, websocket)
@@ -391,6 +394,7 @@ class Experiment(object):
 
         previous_handoff_user = self.ownership.handoff_user
         self.ownership.disconnect(websocket)
+        await self.publish_queue_state()
         self.activeClient = self.ownership.active_owner
         if (
             (was_active_owner or was_handoff_user)
@@ -546,6 +550,8 @@ class Experiment(object):
         self.ownership.complete_reset(success=True)
         self._runtime_state = "ready"
         self.activeClient = self.ownership.active_owner
+        await self.publish_state_change(list(self.devices))
+        await self.publish_queue_state()
         if self.activeClient == websocket:
             await self.sendAlert(websocket, success_message)
         elif self.ownership.handoff_user is not None:
@@ -591,6 +597,7 @@ class Experiment(object):
             except Exception as error:
                 logging.error("Safe stop failed while entering fault: %s", error)
         await self.sendCommandToAllClients(f"fault/{message}")
+        await self.publish_state_change(list(self.devices))
 
     async def recover_from_fault(self, action):
         if self._runtime_state != "faulted":
@@ -599,6 +606,7 @@ class Experiment(object):
             return {"ok": False, "error": "operations_running"}
         if action == "resume":
             self._runtime_state = "ready"
+            await self.publish_state_change(list(self.devices))
             return {"ok": True, "state": "ready"}
         if action == "reset":
             self._runtime_state = "resetting"
@@ -612,6 +620,7 @@ class Experiment(object):
                 await self.enter_fault(f"Recovery reset failed: {error}")
                 return {"ok": False, "error": "reset_failed"}
             self._runtime_state = "ready"
+            await self.publish_state_change(list(self.devices))
             return {"ok": True, "state": "ready"}
         if action == "shutdown":
             await self.shutdown("fault")
@@ -666,6 +675,7 @@ class Experiment(object):
                 await self.sendMessage(websocket, f"{result}")
         else:
             await self.sendMessage(websocket, f"{deviceName} ran {method}")
+        await self.publish_state_change([deviceName])
 
     async def _execute_device_method(self, device, method, params):
         if device.__class__.__name__ == "ArduCamMultiCamera" and method in {"camera", "cameraName"}:
@@ -768,6 +778,50 @@ class Experiment(object):
                 "payload": {"name": name, "data": data},
             }
         )
+
+    def public_device_states(self, device_names=None):
+        names = device_names or self.devices.keys()
+        return {
+            name: getattr(self.devices[name], "getState", lambda: getattr(self.devices[name], "state", {}))()
+            for name in names
+            if name in self.devices
+        }
+
+    def queue_state_for(self, websocket):
+        position = None
+        if websocket in self.ownership.waiting_users:
+            position = self.ownership.waiting_users.index(websocket) + 1
+        return {
+            "waitingCount": len(self.ownership.waiting_users),
+            "hasActiveOwner": self.ownership.active_owner is not None,
+            "position": position,
+        }
+
+    async def send_json_event(self, websocket, name, data):
+        if self.uses_json_protocol(websocket):
+            await self.sendDataToClient(websocket, self.json_event_frame(name, data))
+
+    async def send_state_snapshot(self, websocket):
+        await self.send_json_event(
+            websocket,
+            "state.snapshot",
+            {
+                "revision": self.state_revision,
+                "lifecycle": self._runtime_state,
+                "devices": self.public_device_states(),
+                "lastFault": self.last_fault,
+            },
+        )
+
+    async def publish_state_change(self, device_names):
+        self.state_revision += 1
+        data = {"revision": self.state_revision, "devices": self.public_device_states(device_names)}
+        for client in list(self.clients):
+            await self.send_json_event(client, "state.changed", data)
+
+    async def publish_queue_state(self):
+        for client in list(self.clients):
+            await self.send_json_event(client, "ownership.queue", self.queue_state_for(client))
 
     async def send_json_result(self, websocket, reply_id, status, ok, code=None, detail=None, message=None):
         payload = {"status": status, "ok": ok}
