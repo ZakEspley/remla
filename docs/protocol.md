@@ -119,7 +119,15 @@ Version 1 event names include `message`, `command`, `ownership.queue`, `ownershi
 `reset.started`, `reset.completed`, and `fault`.
 
 `alert.data` contains `severity`, `title`, and `message`. `state.snapshot`
-contains lifecycle, ownership, operations, public device state, and last fault.
+contains a monotonic `revision`, lifecycle, public device state, and last fault.
+It is sent to every JSON connection. `state.changed` contains the next revision
+and one or more changed public device states; clients request a new snapshot
+after a revision gap. Snapshots and changes are published only after successful
+hardware work, reset, recovery, or handoff state changes.
+
+`ownership.queue` contains `waitingCount`, `hasActiveOwner`, and the recipient's
+own `position` when waiting. It is broadcast on connection, disconnection,
+queue changes, and promotion. It never includes client identities.
 Events must not expose passwords, raw device configuration, or internal paths.
 
 ## Debugging
