@@ -19,6 +19,7 @@
 - [x] Added provider-routed binary power commands for configured controllers; configure consumers with YAML `power.provider` and `power.outlet`.
 - [x] Added `PowerConsumer` for standalone provider-backed targets such as diffrac2's Laser and Screen.
 - [x] Switched diffrac2 temporarily to the pinned development source at `/opt/remla/dev/remla-80b49b1`; startup recognized Laser and Screen and local HTTP returned 200. Roll back by removing `/etc/systemd/system/remla.service.d/dev-source.conf`, reloading systemd, and restarting `remla.service`.
+- [x] Operator validated diffrac2 Laser and Screen routed `power_on` and `power_off` commands against the live development service.
 - [x] Ran the diffrac2 development checkout's loopback protocol tests with the installed release Python environment; no hardware commands ran and the production service remained active.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
