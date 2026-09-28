@@ -24,6 +24,7 @@ mediamtxSettingsLocation = Path("/usr/local/etc")
 mediamtxBinaryLocation = Path("/usr/local/bin")
 baseDir = Path(__file__).parent
 settingsDirectory = configDirectory / APP_NAME
+secretsDirectory = Path(os.environ.get("REMLA_SECRETS_DIRECTORY", "/etc/remla/secrets"))
 logsDirectory = settingsDirectory / "logs"
 remoteLabsDirectory = Path(os.environ.get("REMLA_LABS_DIRECTORY", homeDirectory / "remla"))
 setupDirectory = baseDir / "setup"

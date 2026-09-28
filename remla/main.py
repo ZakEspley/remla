@@ -25,6 +25,7 @@ from remla.labcontrol.Controllers import *
 from remla.labcontrol.Experiment import Experiment
 from remla.mediamtx import MediaMTXInstallError, install_latest
 from remla.release import ReleaseError, ReleaseInstaller
+from remla.secrets import list_secrets, remove_secret, set_secret
 from remla.runtime_state import LabConfigIdentity
 from remla.settings import *
 from remla.systemHelpers import *
@@ -48,10 +49,48 @@ def version_callback(value: bool):
 app = typer.Typer(pretty_exceptions_show_locals=False)
 camera_app = typer.Typer(no_args_is_help=True)
 mediamtx_app = typer.Typer(no_args_is_help=True)
+secrets_app = typer.Typer(no_args_is_help=True)
 app.add_typer(setupcmd.app, name="setup")
 app.add_typer(i2ccmd.app, name="i2c")
 app.add_typer(camera_app, name="camera")
 app.add_typer(mediamtx_app, name="mediamtx")
+app.add_typer(secrets_app, name="secrets")
+
+
+def require_root_for_secrets():
+    if os.geteuid() != 0:
+        raise typer.BadParameter("Run this command with sudo.")
+
+
+@secrets_app.command("set")
+def set_secret_command(name: str):
+    """Create or replace a named runtime secret."""
+    require_root_for_secrets()
+    value = typer.prompt("Secret value", hide_input=True, confirmation_prompt=True)
+    try:
+        set_secret(name, value)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    success(f"Stored secret '{name}'.")
+
+
+@secrets_app.command("list")
+def list_secret_command():
+    """List configured secret names without showing values."""
+    require_root_for_secrets()
+    for name in list_secrets():
+        typer.echo(name)
+
+
+@secrets_app.command("remove")
+def remove_secret_command(name: str):
+    """Remove a named runtime secret."""
+    require_root_for_secrets()
+    try:
+        remove_secret(name)
+    except (ValueError, FileNotFoundError) as error:
+        raise typer.BadParameter(str(error)) from error
+    success(f"Removed secret '{name}'.")
 
 
 @app.command(help="Create a personal workspace link to the configured lab root.")

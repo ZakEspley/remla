@@ -1,5 +1,4 @@
 from collections import defaultdict
-import os
 import re
 from pathlib import Path, PosixPath, PurePosixPath, PurePath
 from typing import Any, List
@@ -10,6 +9,7 @@ from ruamel.yaml.nodes import ScalarNode
 
 from remla.device_config import validate_device_arguments
 from remla.labcontrol import Controllers
+from remla.settings import secretsDirectory
 
 
 # Initialize the YAML parser
@@ -18,22 +18,26 @@ yaml = YAML(typ='safe')
 yaml.indent(mapping=2, sequence=4, offset=2)  # Set indentation, optional
 yaml.default_flow_style = False
 
-ENVIRONMENT_REFERENCE = re.compile(r"^\$\{(REMLA_[A-Z0-9_]+)\}$")
+SECRET_REFERENCE = re.compile(r"^\$\{secret:([a-z][a-z0-9-]{0,63})\}$")
 
 
 def resolve_environment_reference(value, device_name, option_name):
     if not isinstance(value, str):
         return value
-    match = ENVIRONMENT_REFERENCE.fullmatch(value)
+    match = SECRET_REFERENCE.fullmatch(value)
     if match is None:
         return value
-    variable_name = match.group(1)
-    resolved = os.environ.get(variable_name)
-    if resolved is None:
+    secret_name = match.group(1)
+    secret_path = secretsDirectory / secret_name
+    try:
+        resolved = secret_path.read_text().rstrip("\n")
+    except FileNotFoundError as error:
         raise ValueError(
-            f"Device '{device_name}' requires environment variable '{variable_name}' "
+            f"Device '{device_name}' requires secret '{secret_name}' "
             f"for option '{option_name}'"
-        )
+        ) from error
+    if not resolved:
+        raise ValueError(f"Secret '{secret_name}' is empty")
     return resolved
 # yaml.allow_unicode = True
 

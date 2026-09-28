@@ -1,22 +1,23 @@
 # Runtime secrets
 
-Do not store passwords or tokens in Git-managed lab YAML. Reference an explicit
-ReMLA environment variable instead:
+Do not store passwords or tokens in Git-managed lab YAML. Reference a named
+ReMLA secret instead:
 
 ```yaml
 ASDIpdu:
   type: PDUOutlet
-  password: ${REMLA_ASDIPDU_PASSWORD}
+  password: ${secret:asdipdu-password}
 ```
 
-Installed services read `/etc/remla/remla.env` through systemd. Create it with
-root ownership and `0640` permissions readable by the `remla` group, for
-example:
+Use root-only commands to create or rotate a secret:
 
-```ini
-REMLA_ASDIPDU_PASSWORD=replace-with-current-password
+```bash
+sudo remla secrets set asdipdu-password
 ```
 
-After changing the file, restart `remla.service`. A missing referenced variable
-stops startup with the variable name but never prints its value. Do not commit,
-copy into a development checkout, or include this file in support bundles.
+ReMLA stores each value at `/etc/remla/secrets/<name>`, root-owned and readable
+by the `remla` group. This works in both foreground and systemd service mode.
+`sudo remla secrets list` shows names only; `sudo remla secrets remove NAME`
+removes one. After rotation, restart ReMLA. A missing reference stops startup
+with the secret name but never prints its value. Do not commit, copy into a
+development checkout, or include secret files in support bundles.
