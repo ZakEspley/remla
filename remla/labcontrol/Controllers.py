@@ -35,6 +35,7 @@ from remla.labcontrol.hardware import (
     pigpio,
     visaManager,
 )
+from remla.dli_rest import DliRestClient
 from remla.mediamtx_camera import patch_camera_control
 from remla.systemHelpers import resolve_i2c_bus
 
@@ -214,6 +215,7 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
         timeout=None,
         outlets=[1, 2, 3, 4, 5, 6, 7, 8],
         outletMap={},
+        apiMode="legacy",
     ):
         BaseController.__init__(self, name)
         dlipower.PowerSwitch.__init__(
@@ -232,14 +234,28 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
         }
         self.outlets = outlets
         self.outletMap = outletMap
+        self.apiMode = apiMode
+        self.rest_client = None
+        if apiMode == "rest":
+            self.rest_client = DliRestClient(
+                f"http://{hostname}", userid, password, timeout=timeout or 10
+            )
+        elif apiMode != "legacy":
+            raise ValueError("apiMode must be legacy or rest")
         # self.login()
 
     def on(self, outletNumber):
-        self._set_outlet(outletNumber, "ON")
+        if getattr(self, "rest_client", None) is not None:
+            self.rest_client.set_state(outletNumber - 1, True)
+        else:
+            self._set_outlet(outletNumber, "ON")
         self.state[outletNumber] = "On"
 
     def off(self, outletNumber):
-        self._set_outlet(outletNumber, "OFF")
+        if getattr(self, "rest_client", None) is not None:
+            self.rest_client.set_state(outletNumber - 1, False)
+        else:
+            self._set_outlet(outletNumber, "OFF")
         self.state[outletNumber] = "Off"
 
     def _set_outlet(self, outletNumber, state):
@@ -263,6 +279,10 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
 
     def get_power_state(self, target):
         outlet = self.resolve_power_target(target)
+        if getattr(self, "rest_client", None) is not None:
+            state = self.rest_client.get_physical_state(outlet - 1)
+            self.state[outlet] = "On" if state else "Off"
+            return "on" if state else "off"
         status = super().status(outlet)
         normalized = str(status).lower()
         if normalized not in {"on", "off"}:
@@ -320,6 +340,11 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
         return outlet
 
     def reset(self):
+        if getattr(self, "rest_client", None) is not None:
+            self.rest_client.set_all_states(False)
+            for outlet in self.outlets:
+                self.state[outlet] = "Off"
+            return
         for outlet in self.outlets:
             self.off(outlet)
 

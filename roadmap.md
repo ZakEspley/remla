@@ -37,6 +37,7 @@
 - [x] Operator validated one page refresh restores control without PDU lockout, and legacy Laser/Screen UI controls continue to work on diffrac2's reduced-request development service.
 - [x] Removed departed owners from ownership before draining their work; drain failures now fault without leaving a ghost active owner and notify any pending handoff user.
 - [x] Queue connections arriving during departed-work draining and promote them only after reset/handoff readiness, preventing new active ownership during unsafe teardown.
+- [ ] Replace legacy `dlipower` HTML/CGI control with an internal DLI REST client using HTTP Digest authentication. Read `physical_state` for toggle, use zero-based REST outlet indexes, and reset all outlets through one REST all-off request. Mocked HTTP tests cover the client; confirm the PDU REST setting before enabling it on diffrac2. Later use a scoped non-admin PDU API account for outlets 5 and 6.
 - [x] Ran the diffrac2 development checkout's loopback protocol tests with the installed release Python environment; no hardware commands ran and the production service remained active.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
