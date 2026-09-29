@@ -167,6 +167,7 @@ Current coverage verifies repeated shutdown requests share one future, foregroun
 **Hardware verification:** clean-image installer; interactive camera setup; reboot and confirm one camera cycle; unprivileged `remla status/start/stop/recover/upgrade`; disconnect an active browser during motor/camera use; Ctrl+C from `remla run -f`; `systemctl stop remla`; camera cleanup/restart; physical actuator safe state; reconnect after reset; service restart after fault.
 
 ## Deferred work
+- [ ] Publish a framework-free `remlaJsonSocket.js` example and companion guide for custom lab websites. It must negotiate `remla-json-v1`, expose snapshot/state/queue/fault handlers, correlate command results by `replyId`, request resynchronization after reconnect or revision gaps, and remain separate from the legacy `remlaSocket.js` compatibility client.
 - [ ] Add deterministic multi-lock acquisition only if a future command must reserve more than one lock group; preserve lock ordering and dedicated concurrency tests.
 - [ ] Add explicit operator-requested persisted-state recovery only after controllers declare which state fields are safe to restore.
 - [ ] Add authentication only if deployment boundaries change from the current trusted-network model.
