@@ -48,9 +48,16 @@ class DliRestClient:
         )
 
     def set_all_states(self, enabled):
+        self.set_states("all;", enabled)
+
+    def set_states(self, outlet_indexes, enabled):
+        if isinstance(outlet_indexes, str):
+            selector = outlet_indexes
+        else:
+            selector = "=" + ",".join(str(index) for index in outlet_indexes)
         self._request(
             "PUT",
-            "relay/outlets/all;/state/",
+            f"relay/outlets/{selector}/state/",
             headers={"X-CSRF": "x"},
             data={"value": "true" if enabled else "false"},
         )

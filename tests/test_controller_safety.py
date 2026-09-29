@@ -34,6 +34,17 @@ class ControllerSafeStopTests(unittest.TestCase):
 
         geturl.assert_called_once_with("outlet?5=ON")
         self.assertEqual(pdu.retries, 3)
+
+    def test_rest_pdu_reset_only_targets_configured_outlets(self):
+        pdu = object.__new__(controllers.PDUOutlet)
+        pdu.initParameters = {}
+        pdu.outlets = [5, 6]
+        pdu.state = {5: "On", 6: "On"}
+        pdu.rest_client = mock.Mock()
+
+        pdu.reset()
+
+        pdu.rest_client.set_states.assert_called_once_with([4, 5], False)
     def test_configured_power_route_delegates_on_off_and_toggle(self):
         class Consumer(controllers.BaseController):
             deviceType = "controller"

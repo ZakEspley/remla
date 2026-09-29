@@ -341,7 +341,7 @@ class PDUOutlet(dlipower.PowerSwitch, BaseController):
 
     def reset(self):
         if getattr(self, "rest_client", None) is not None:
-            self.rest_client.set_all_states(False)
+            self.rest_client.set_states([outlet - 1 for outlet in self.outlets], False)
             for outlet in self.outlets:
                 self.state[outlet] = "Off"
             return

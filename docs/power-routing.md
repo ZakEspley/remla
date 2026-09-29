@@ -22,7 +22,8 @@ providers, targets, and lock assignments during startup.
 `PDUOutlet` supports `apiMode: rest` for DLI controllers with the REST-style
 API enabled. REST mode uses HTTP Digest authentication, reads each outlet's
 physical state, maps ReMLA outlet numbers to DLI's zero-based indexes, and uses
-one all-off request during reset. Keep `apiMode: legacy` until REST mode is
+one all-off request scoped to the PDU controller's configured `outlets` during
+reset. Shared PDUs must list only outlets belonging to the active lab. Keep `apiMode: legacy` until REST mode is
 validated for a lab.
 
 `PDUOutlet` refreshes its outlet status from the DLI provider before a toggle.
