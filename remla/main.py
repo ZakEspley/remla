@@ -1083,6 +1083,15 @@ def start():
         alert(f"Failed to start remla: {exc}")
 
 
+@app.command()
+def restart():
+    try:
+        subprocess.run(["systemctl", "restart", "remla.service"], check=True)
+        success("Restarted remla")
+    except (OSError, subprocess.CalledProcessError) as exc:
+        alert(f"Failed to restart remla: {exc}")
+
+
 def device_type_summary(devices):
     return {name: details.get("type", "unknown") for name, details in devices.items()}
 
