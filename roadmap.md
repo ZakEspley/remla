@@ -41,6 +41,7 @@
 - [x] Enabled DLI REST mode on diffrac2, verified a read-only physical-state request, and operator-validated REST-backed legacy UI Laser/Screen on/off writes.
 - [x] Operator validated diffrac2 REST-backed `Laser/power_toggle/`, using the provider's physical outlet state.
 - [x] Scoped REST PDU reset requests to configured lab outlets; shared-PDU configuration must never use an all-outlet reset.
+- [x] Operator validated two diffrac2 REST resets: Laser and Screen turned off while an independently enabled shared-PDU outlet remained on.
 - [x] Ran the diffrac2 development checkout's loopback protocol tests with the installed release Python environment; no hardware commands ran and the production service remained active.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
