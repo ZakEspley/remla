@@ -37,6 +37,18 @@ def get_writable_logs_directory():
         foreground_logs = homeDirectory / ".local" / "state" / APP_NAME / "logs"
         foreground_logs.mkdir(parents=True, exist_ok=True)
         return foreground_logs
+
+
+def get_writable_log_path(filename):
+    primary = get_writable_logs_directory() / filename
+    try:
+        with primary.open("a"):
+            pass
+        return primary
+    except PermissionError:
+        foreground_logs = homeDirectory / ".local" / "state" / APP_NAME / "logs"
+        foreground_logs.mkdir(parents=True, exist_ok=True)
+        return foreground_logs / filename
 remoteLabsDirectory = Path(os.environ.get("REMLA_LABS_DIRECTORY", homeDirectory / "remla"))
 setupDirectory = baseDir / "setup"
 overlayDirectory = baseDir / "overlays"
