@@ -20,12 +20,12 @@
 - [x] Added `PowerConsumer` for standalone provider-backed targets such as diffrac2's Laser and Screen.
 - [x] Switched diffrac2 temporarily to the pinned development source at `/opt/remla/dev/remla-80b49b1`; startup recognized Laser and Screen and local HTTP returned 200. Roll back by removing `/etc/systemd/system/remla.service.d/dev-source.conf`, reloading systemd, and restarting `remla.service`.
 - [x] Operator validated diffrac2 Laser and Screen routed `power_on` and `power_off` commands against the live development service.
-- [ ] Publish opt-in JSON `state.snapshot` to every connection and authoritative `state.changed` events after successful state-changing commands, reset, fault recovery, and ownership handoff. Include a monotonic state revision so clients can detect gaps and resynchronize without relying on optimistic UI state.
-- [ ] Publish anonymous JSON ownership/queue presence events on connect, disconnect, queue changes, and promotion. Expose queue counts and the recipient's own position, never client identities.
+- [x] Publish opt-in JSON `state.snapshot` to every connection and authoritative `state.changed` events after successful state-changing commands, reset, fault recovery, and ownership handoff. Include a monotonic state revision so clients can detect gaps and resynchronize without relying on optimistic UI state.
+- [x] Publish anonymous JSON ownership/queue presence events on connect, disconnect, queue changes, and promotion. Expose queue counts and the recipient's own position, never client identities.
 
 ### Current implementation order
 
-1. [ ] Restore the in-progress JSON state-event branch to a fully tested baseline before layering further behavior.
+1. [x] Restore the in-progress JSON state-event branch to a fully tested baseline before layering further behavior.
 2. [x] Make `PDUOutlet` refresh outlet state from the provider for `get_power_state()` and `power_toggle`; return a safe command error when state cannot be read.
 3. [x] Replace PDU credentials in lab YAML with `${secret:name}` references backed by root-owned `/etc/remla/secrets/` files; validate missing-secret failures and provide root-only `remla secrets` management commands. diffrac2 migrated `asdipdu-password`; credential rotation follows separately.
 4. [x] Implement JSON state revisions, initial snapshots, post-success state changes, and snapshot publication after reset, recovery, and handoff. Do not expose secrets, raw configuration, operation owners, or internal paths.
@@ -41,9 +41,9 @@
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
 ## Current runtime defects to remove
-- `handleConnection()` tracks each active-client command task. On owner loss it cancels queued operations, waits for scheduler-tracked work to finish, then promotes the next FIFO user into the timed handoff state; lifecycle and transport state transitions are not yet published.
+- `handleConnection()` tracks each active-client command task. On owner loss it removes ownership before draining scheduler-tracked work, queues arrivals during draining, and promotes the next FIFO user into the timed handoff state; JSON lifecycle and ownership events are published, while legacy clients retain text framing.
 - `resetExperiment()` remains a blocking legacy helper; use `Experiment.shutdown()` or handoff reset so scheduler fencing applies.
-- `runDeviceMethod()` tracks every device command and applies required lock-group serialization. Handoff resets and shutdown cancel queued operations, drain scheduler work, and acquire every configured scheduler lock; timeout/reset faults block admission and emit a legacy fault event, while structured state publication remains unfinished.
+- `runDeviceMethod()` tracks every device command and applies required lock-group serialization. Handoff resets and shutdown cancel queued operations, drain scheduler work, and acquire every configured scheduler lock; timeout/reset faults block admission and publish JSON state changes for negotiated clients.
 - After runtime initialization, foreground SIGINT/SIGTERM request coordinator shutdown. Foreground startup failure invokes coordinator teardown before PID removal; service/CLI stop still use separate paths.
 - `stop()` stops the systemd service and may signal a foreground PID, but does not use one shared teardown contract.
 - Every controller now explicitly implements abstract `safe_stop()`. DC/stepper/continuous motors, servos, GPIO outputs, PWM, multiplexers, plugs/PDUs, and cameras have output-specific behavior; measurement and switch-only controllers explicitly declare no physical stop. Hardware validation of the resulting safe states remains required.
@@ -137,7 +137,7 @@ Current coverage verifies repeated shutdown requests share one future, foregroun
 **Tests:** Ctrl+C while idle; Ctrl+C during a blocking command; SIGTERM during reset; repeated signals; startup failure after partial device creation; reset exception aggregation; exactly-once PID/socket cleanup; executor shutdown.
 
 ### 5. Migrate control and IPC messages to JSON
-- [x] Specify version 1 JSON event envelopes and payloads in `docs/protocol.md` for `state.snapshot`, `state.changed`, `operation.queued`, `operation.started`, `operation.completed`, `operation.failed`, `reset.started`, `reset.completed`, and `fault`. Live WebSocket delivery remains legacy-only.
+- [x] Specify and implement negotiated version 1 JSON envelopes in `docs/protocol.md`, including `state.snapshot`, `state.changed`, queue, reset, and fault events. Legacy clients retain their existing framing.
 - [ ] Include operation ID and lifecycle state in every result, error, and camera event.
 - [ ] Support legacy slash-delimited requests/responses per connection during the agreed compatibility window; never mix legacy and JSON frames on one connection.
 - [ ] Update the maintained browser WebSocket client to render control-owner/waiting-user status, current operations, reset/fault status, and reconnect state. Remove duplicate/stale socket client assets, including the tracked conflict-marker file.
@@ -152,7 +152,7 @@ Current coverage verifies repeated shutdown requests share one future, foregroun
 - [x] Add `remla link [PATH]` to create a safe personal symlink to the canonical lab root without overwriting existing workspace paths. Git remains responsible for cloning, branches, and updates.
 - [x] Migrate packaging from Poetry to PEP 621 + UV. GitHub tag releases build a wheel, hash-locked requirements, installer, service, and policy assets; the installer verifies release checksums and installs the wheel without requiring UV or pipx on the Pi.
 - [x] Keep `remla setup int` and `remla setup lab` unprivileged for lab selection/configuration; `sudo remla setup deploy-website` now performs nginx configuration and website deployment to `/var/www/remla`.
-- [ ] Remove credential-bearing device configuration from startup logs, migrate PDU credentials out of Git-managed lab YAML, and rotate the exposed diffrac2 PDU credential before committing or sharing that lab workspace.
+- [ ] Rotate the diffrac2 PDU credential after its named secret-store migration; do not commit or print the value.
 - [ ] Publish the first stable `v0.4.0` GitHub Release and validate its installer from a clean Raspberry Pi OS image. Add signed release provenance; until then the convenience installer explicitly relies on GitHub Release integrity and its checksums only detect transfer or asset corruption.
 
 **Current Pi validation:** diffrac2 completed interactive setup, selected `remoteLabs/diffrac2.yml`, initialized the configured controllers, and reached a stable active systemd service with a group-restricted IPC socket. The deployed `sudo remla camera setup` workflow completed successfully, including its required reboot and post-boot operation. Unprivileged `remla status` and `remla stop`, followed by permitted `systemctl start remla.service`, recovered the service, IPC socket, and local nginx `200 OK`. A direct systemd stop/start completed coordinator teardown and recovery; shutdown with a deliberately active or queued hardware operation remains unverified. Clean-image and remaining hardware behavior remain unverified.
