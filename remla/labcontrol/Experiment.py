@@ -132,7 +132,7 @@ class Experiment(object):
         self._runtime_state = "new"
         self.last_fault = None
         self.state_revision = 0
-        self.logPath = logsDirectory / f"{self.name}.log"
+        self.logPath = get_writable_logs_directory() / f"{self.name}.log"
 
     def initialize_runtime(self):
         with self._runtime_initialization_lock:

@@ -70,7 +70,7 @@ def get_camera_logger() -> logging.Logger:
     """
     logger = logging.getLogger("remla.camera_cycle")
     if not logger.handlers:
-        handler = logging.FileHandler(logsDirectory / "camera_cycle.log")
+        handler = logging.FileHandler(get_writable_logs_directory() / "camera_cycle.log")
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)

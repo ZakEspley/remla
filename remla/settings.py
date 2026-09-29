@@ -26,6 +26,16 @@ baseDir = Path(__file__).parent
 settingsDirectory = configDirectory / APP_NAME
 secretsDirectory = Path(os.environ.get("REMLA_SECRETS_DIRECTORY", "/etc/remla/secrets"))
 logsDirectory = settingsDirectory / "logs"
+
+
+def get_writable_logs_directory():
+    try:
+        logsDirectory.mkdir(parents=True, exist_ok=True)
+        return logsDirectory
+    except PermissionError:
+        foreground_logs = homeDirectory / ".local" / "state" / APP_NAME / "logs"
+        foreground_logs.mkdir(parents=True, exist_ok=True)
+        return foreground_logs
 remoteLabsDirectory = Path(os.environ.get("REMLA_LABS_DIRECTORY", homeDirectory / "remla"))
 setupDirectory = baseDir / "setup"
 overlayDirectory = baseDir / "overlays"
