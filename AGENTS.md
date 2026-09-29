@@ -19,6 +19,7 @@
 - Persisted state is diagnostic only at startup; a lab name/hash mismatch is preserved and requires explicit operator archive/discard or configuration restoration.
 - WebSocket server logic lives in remla/labcontrol/Experiment.py.
 - `docs/protocol.md` defines negotiated JSON protocol version 1 alongside legacy WebSocket framing; preserve legacy frames for clients that do not complete JSON `hello` negotiation.
+- `remla/setup/remlaJsonSocket.js` and `docs/json-websocket-client.md` provide a framework-free copyable JSON client for custom lab websites; it is separate from legacy `remlaSocket.js`.
 - `docs/reset-baseline.md` records current controller reset behavior and the owner-disconnect policy; motor position is process-tracked from YAML `initialPosition` until homing is configured.
 - Paths and system locations are centralized in remla/settings.py.
 

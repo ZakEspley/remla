@@ -140,7 +140,7 @@ def _setup(labSettings:dict)->None:
             copy_lab_asset(websiteSettings["staticFolder"], staging_path / "static", directory=True)
         setup_js_directory = staging_path / "static" / "js"
         setup_js_directory.mkdir(parents=True, exist_ok=True)
-        for filename in ("reader.js", "mediaMTXGetFeed.js", "remlaSocket.js"):
+        for filename in ("reader.js", "mediaMTXGetFeed.js", "remlaSocket.js", "remlaJsonSocket.js"):
             shutil.copy(setupDirectory / filename, setup_js_directory)
         set_website_permissions(staging_path)
     except BaseException:
