@@ -39,6 +39,7 @@
 - [x] Queue connections arriving during departed-work draining and promote them only after reset/handoff readiness, preventing new active ownership during unsafe teardown.
 - [ ] Replace legacy `dlipower` HTML/CGI control with an internal DLI REST client using HTTP Digest authentication. Read `physical_state` for toggle, use zero-based REST outlet indexes, and reset all outlets through one REST all-off request. Mocked HTTP tests cover the client; confirm the PDU REST setting before enabling it on diffrac2. Later use a scoped non-admin PDU API account for outlets 5 and 6.
 - [x] Enabled DLI REST mode on diffrac2, verified a read-only physical-state request, and operator-validated REST-backed legacy UI Laser/Screen on/off writes.
+- [x] Operator validated diffrac2 REST-backed `Laser/power_toggle/`, using the provider's physical outlet state.
 - [x] Ran the diffrac2 development checkout's loopback protocol tests with the installed release Python environment; no hardware commands ran and the production service remained active.
 - [x] Confirmed that current `clients` deque is an incomplete user-control queue and that configured `asyncio.Lock` instances provide per-lock-group command serialization.
 
