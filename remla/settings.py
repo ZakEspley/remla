@@ -31,7 +31,8 @@ logsDirectory = settingsDirectory / "logs"
 def get_writable_logs_directory():
     try:
         logsDirectory.mkdir(parents=True, exist_ok=True)
-        return logsDirectory
+        if os.access(logsDirectory, os.W_OK):
+            return logsDirectory
     except PermissionError:
         foreground_logs = homeDirectory / ".local" / "state" / APP_NAME / "logs"
         foreground_logs.mkdir(parents=True, exist_ok=True)
