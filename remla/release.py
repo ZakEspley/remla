@@ -85,18 +85,17 @@ class ReleaseInstaller:
 
         with tempfile.TemporaryDirectory(dir=self.root, prefix="download-") as download_directory:
             wheel, requirements = self.download_release(version, Path(download_directory))
-            temporary_release = self.root / "releases" / f".{version}-{uuid.uuid4().hex}"
             try:
-                subprocess.run([sys.executable, "-m", "venv", temporary_release / "venv"], check=True)
-                pip = temporary_release / "venv" / "bin" / "pip"
+                release_directory.mkdir()
+                subprocess.run([sys.executable, "-m", "venv", release_directory / "venv"], check=True)
+                pip = release_directory / "venv" / "bin" / "pip"
                 subprocess.run(
                     [pip, "install", "--require-hashes", "--no-deps", "-r", requirements],
                     check=True,
                 )
                 subprocess.run([pip, "install", "--no-deps", wheel], check=True)
-                os.replace(temporary_release, release_directory)
             except (OSError, subprocess.CalledProcessError) as error:
-                shutil.rmtree(temporary_release, ignore_errors=True)
+                shutil.rmtree(release_directory, ignore_errors=True)
                 raise ReleaseError(f"could not install ReMLA {version}: {error}") from error
         self.activate(version)
         return version

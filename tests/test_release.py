@@ -47,6 +47,28 @@ class ReleaseInstallerTests(unittest.TestCase):
             self.assertEqual((root / "current").resolve(), first)
             self.assertEqual((root / "previous").resolve(), second)
 
+    def test_install_creates_venv_at_final_release_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "install"
+            wheel = Path(directory) / "remla-0.4.1-py3-none-any.whl"
+            requirements = Path(directory) / "requirements.txt"
+            wheel.write_bytes(b"wheel")
+            requirements.write_text("")
+            installer = ReleaseInstaller(root)
+
+            def create_venv(command, check):
+                if command[1:3] == ["-m", "venv"]:
+                    (Path(command[-1]) / "bin").mkdir(parents=True)
+
+            with (
+                mock.patch.object(installer, "download_release", return_value=(wheel, requirements)),
+                mock.patch("remla.release.subprocess.run", side_effect=create_venv) as run,
+            ):
+                installer.install("0.4.1")
+
+            venv_command = run.call_args_list[0].args[0]
+            self.assertEqual(venv_command[-1], root / "releases" / "0.4.1" / "venv")
+
     def test_upgrade_rolls_back_when_service_restart_fails(self):
         from remla import main
 

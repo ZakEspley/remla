@@ -16,7 +16,7 @@ For a reproducible install, replace `latest` with a tagged release and pass its
 version:
 
 ```bash
-curl -fsSL https://github.com/ZakEspley/remla/releases/download/v0.4.1/install.sh | sudo bash -s -- --version 0.4.1
+curl -fsSL https://github.com/ZakEspley/remla/releases/download/v0.4.2/install.sh | sudo bash -s -- --version 0.4.2
 ```
 
 The installer configures privileged system resources: apt dependencies, ReMLA
@@ -30,9 +30,9 @@ independently authenticate a compromised GitHub release. Review a tagged
 installer before use if your deployment requires that assurance:
 
 ```bash
-curl -fL -O https://github.com/ZakEspley/remla/releases/download/v0.4.1/install.sh
+curl -fL -O https://github.com/ZakEspley/remla/releases/download/v0.4.2/install.sh
 less install.sh
-sudo bash install.sh --version 0.4.1
+sudo bash install.sh --version 0.4.2
 ```
 
 Sign out and back in (or reboot) after installation so the operator receives
@@ -98,7 +98,7 @@ wheel on a dedicated test Pi:
 ```bash
 uv sync
 uv build
-sudo ./scripts/install.sh --wheel dist/remla-0.4.1-py3-none-any.whl
+sudo ./scripts/install.sh --wheel dist/remla-0.4.2-py3-none-any.whl
 ```
 
 Use `--dry-run` to inspect the local-wheel installation plan without changing

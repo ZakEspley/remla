@@ -42,7 +42,7 @@ class PiInstallerTests(unittest.TestCase):
 
     def test_dry_run_uses_local_wheel_and_dedicated_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
-            wheel = Path(directory) / "remla-0.4.1-py3-none-any.whl"
+            wheel = Path(directory) / "remla-0.4.2-py3-none-any.whl"
             wheel.touch()
 
             result = subprocess.run(
@@ -55,7 +55,7 @@ class PiInstallerTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("/opt/remla/releases/0.4.1", result.stdout)
+        self.assertIn("/opt/remla/releases/0.4.2", result.stdout)
         self.assertIn("/usr/local/bin/remla", result.stdout)
         self.assertIn("remla.service", result.stdout)
         self.assertIn("operator pi", result.stdout)
