@@ -32,7 +32,7 @@
 - Sync dependencies: `uv sync`
 - Build package: `uv build`
 - Run CLI: `uv run remla --help`
-- Stable Pi releases are published to GitHub Releases. `scripts/install.sh` installs a release into `/opt/remla`; `packaging/remla.service` runs its stable `/opt/remla/current` symlink as the `remla` service account. Version `0.4.0` is the current stable release. Do not run this installer on a development workstation except with `--dry-run`.
+- Stable Pi releases are published to GitHub Releases. `scripts/install.sh` installs a release into `/opt/remla`; `packaging/remla.service` runs its stable `/opt/remla/current` symlink as the `remla` service account. Version `0.4.1` is the current stable release. Do not run this installer on a development workstation except with `--dry-run`.
 
 ## Lint / format
 - No lint or formatter configuration is present in this repo.

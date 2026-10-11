@@ -1,3 +1,23 @@
+function createMessageId() {
+    const browserCrypto = typeof globalThis !== "undefined" ? globalThis.crypto : null;
+    if (browserCrypto?.randomUUID) {
+        return browserCrypto.randomUUID();
+    }
+    const bytes = new Uint8Array(16);
+    if (browserCrypto?.getRandomValues) {
+        browserCrypto.getRandomValues(bytes);
+    } else {
+        for (let index = 0; index < bytes.length; index += 1) {
+            bytes[index] = Math.floor(Math.random() * 256);
+        }
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"))
+        .join("")
+        .replace(/^(........)(....)(....)(....)(............)$/, "$1-$2-$3-$4-$5");
+}
+
 class RemlaJsonSocket {
     constructor(options = {}) {
         this.url = options.url || this.defaultUrl();
@@ -32,7 +52,7 @@ class RemlaJsonSocket {
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
             return Promise.reject(new Error("ReMLA WebSocket is not open"));
         }
-        const messageId = crypto.randomUUID();
+        const messageId = createMessageId();
         const frame = {
             meta: { timestamp: new Date().toISOString(), version: this.version, messageId, replyId: null },
             type: "command",
