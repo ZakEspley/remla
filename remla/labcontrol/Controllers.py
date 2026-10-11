@@ -2628,12 +2628,15 @@ class ElectronicScreen(BaseController):
 
     def on(self, params):
         gpio.output(self.pin, gpio.HIGH)
+        self.state = "on"
 
     def off(self, params):
         gpio.output(self.pin, gpio.LOW)
+        self.state = "off"
 
     def reset(self):
         gpio.output(self.pin, gpio.LOW)
+        self.state = "off"
 
     def safe_stop(self):
         self.reset()
@@ -2692,7 +2695,7 @@ class SingleGPIO(BaseController):
         self.pin = pin
         gpio.setup(self.pin, gpio.OUT)
         if initialState:
-            self.state = "off"
+            self.state = "on"
             gpio.output(self.pin, gpio.HIGH)
         else:
             self.state = "off"
@@ -2700,12 +2703,15 @@ class SingleGPIO(BaseController):
 
     def on(self, params):
         gpio.output(self.pin, gpio.HIGH)
+        self.state = "on"
 
     def off(self, params):
         gpio.output(self.pin, gpio.LOW)
+        self.state = "off"
 
     def reset(self):
         gpio.output(self.pin, gpio.LOW)
+        self.state = "off"
 
     def safe_stop(self):
         self.reset()

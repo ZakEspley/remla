@@ -79,6 +79,26 @@ class ControllerSafeStopTests(unittest.TestCase):
 
         provider.set_power_state.assert_not_called()
         self.assertEqual(consumer.state["power"], "unknown")
+
+    def test_single_gpio_reports_each_output_state(self):
+        gpio = mock.Mock()
+        gpio.HIGH = 1
+        gpio.LOW = 0
+        gpio.OUT = "out"
+
+        with mock.patch.object(controllers, "gpio", gpio):
+            controller = controllers.SingleGPIO("Ambient", 17, initialState=True)
+            self.assertEqual(controller.state, "on")
+
+            controller.off([])
+            self.assertEqual(controller.state, "off")
+
+            controller.on([])
+            self.assertEqual(controller.state, "on")
+
+            controller.reset()
+            self.assertEqual(controller.state, "off")
+
     def test_every_concrete_controller_declares_safe_stop(self):
         controller_types = [
             controllers.PDUOutlet,

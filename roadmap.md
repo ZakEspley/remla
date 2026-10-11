@@ -22,6 +22,7 @@
 - [x] Operator validated diffrac2 Laser and Screen routed `power_on` and `power_off` commands against the live development service.
 - [x] Publish opt-in JSON `state.snapshot` to every connection and authoritative `state.changed` events after successful state-changing commands, reset, fault recovery, and ownership handoff. Include a monotonic state revision so clients can detect gaps and resynchronize without relying on optimistic UI state.
 - [x] Publish anonymous JSON ownership/queue presence events on connect, disconnect, queue changes, and promotion. Expose queue counts and the recipient's own position, never client identities.
+- [x] Publish recipient-specific JSON ownership control state and structured timed handoff choices. `SingleGPIO` now reports on/off output state so clients can render authoritative ambient-light state.
 
 ### Current implementation order
 
@@ -163,6 +164,7 @@ Current coverage verifies repeated shutdown requests share one future, foregroun
 - [x] Replaced diffrac2's temporary development-source override with the published `v0.4.0` installer using `--skip-init`, preserving its lab configuration and secrets, then removed the unused development checkout. The installed service, IPC status command, and local website endpoint are healthy.
 - [x] Published stable `v0.4.2` at `2208059`, including the JSON-client UUID fallback and the final-path virtual-environment fix. `v0.4.1` remains unsuitable for `remla upgrade` because its launcher can retain a deleted staging path.
 - [x] Installed `v0.4.2` on diffrac2 with the published installer, redeployed the website, and verified its service, IPC status command, local HTTP endpoint, and installed/deployed JSON-client hashes.
+- [ ] Publish and deploy the pending JSON ownership/state synchronization patch after full regression and browser smoke testing on diffrac2.
 - [ ] Validate the current stable installer from a clean Raspberry Pi OS image. Add signed release provenance; until then the convenience installer explicitly relies on GitHub Release integrity and its checksums only detect transfer or asset corruption.
 
 **Current Pi validation:** diffrac2 completed interactive setup, selected `remoteLabs/diffrac2.yml`, initialized the configured controllers, and reached a stable active systemd service with a group-restricted IPC socket. The deployed `sudo remla camera setup` workflow completed successfully, including its required reboot and post-boot operation. Unprivileged `remla status` and `remla stop`, followed by permitted `systemctl start remla.service`, recovered the service, IPC socket, and local nginx `200 OK`. A direct systemd stop/start completed coordinator teardown and recovery; shutdown with a deliberately active or queued hardware operation remains unverified. Clean-image and remaining hardware behavior remain unverified.

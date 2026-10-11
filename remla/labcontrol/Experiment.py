@@ -289,6 +289,7 @@ class Experiment(object):
                     "Experiment/controlStatus/0,You are connected but do not have control of the lab equipment.",
                 )
             await self.send_state_snapshot(websocket)
+            await self.send_control_state(websocket)
             await self.publish_queue_state()
             async for command in websocket:
                 if self.uses_json_protocol(websocket):
@@ -395,6 +396,7 @@ class Experiment(object):
             self.activeClient = None
 
             self._runtime_state = "draining"
+            await self.publish_control_states()
 
         previous_handoff_user = self.ownership.handoff_user
         self.ownership.disconnect(websocket)
@@ -413,6 +415,7 @@ class Experiment(object):
                 return
             if self.ownership.handoff_user is not None:
                 self._runtime_state = "ready"
+                await self.publish_control_states()
         if (
             (was_active_owner or was_handoff_user)
             and self.ownership.active_owner is None
@@ -424,6 +427,7 @@ class Experiment(object):
 
     async def reset_after_owner_disconnect(self):
         self._runtime_state = "resetting"
+        await self.publish_control_states()
         try:
             await self.cancel_queued_operations()
             await self.command_scheduler.wait_for_idle()
@@ -440,6 +444,7 @@ class Experiment(object):
             return False
         self._runtime_state = "ready"
         self.ownership.promote_waiting_user()
+        await self.publish_control_states()
         if self.ownership.handoff_user is not None:
             await self.notify_handoff_user()
         return True
@@ -500,6 +505,8 @@ class Experiment(object):
         if choice == "continue":
             self.activeClient = websocket
             await self.sendAlert(websocket, "Experiment/controlStatus/1,You have control of the lab equipment.")
+            await self.publish_control_states()
+            await self.publish_queue_state()
             return True
 
         return await self.complete_handoff_reset(
@@ -528,6 +535,12 @@ class Experiment(object):
         if handoff_user is None:
             self.cancel_handoff_timeout()
             return
+        await self.send_control_state(handoff_user)
+        await self.send_json_event(
+            handoff_user,
+            "ownership.handoff",
+            {"choices": ["continue", "reset"], "timeoutSeconds": self.handoff_timeout},
+        )
         await self.sendAlert(
             handoff_user,
             "Experiment/controlStatus/0,Choose CONTROL/handoff/continue or CONTROL/handoff/reset.",
@@ -554,6 +567,7 @@ class Experiment(object):
 
     async def complete_handoff_reset(self, websocket, success_message, reset_reason):
         self._runtime_state = "resetting"
+        await self.publish_control_states()
         try:
             await self.cancel_queued_operations()
             await self.command_scheduler.wait_for_idle()
@@ -570,6 +584,7 @@ class Experiment(object):
         self.ownership.complete_reset(success=True)
         self._runtime_state = "ready"
         self.activeClient = self.ownership.active_owner
+        await self.publish_control_states()
         await self.publish_state_change(list(self.devices))
         await self.publish_queue_state()
         if self.activeClient == websocket:
@@ -609,6 +624,7 @@ class Experiment(object):
     async def enter_fault(self, message):
         self._runtime_state = "faulted"
         self.last_fault = message
+        await self.publish_control_states()
         await self.cancel_queued_operations()
         if self.executor is not None:
             loop = asyncio.get_running_loop()
@@ -626,10 +642,12 @@ class Experiment(object):
             return {"ok": False, "error": "operations_running"}
         if action == "resume":
             self._runtime_state = "ready"
+            await self.publish_control_states()
             await self.publish_state_change(list(self.devices))
             return {"ok": True, "state": "ready"}
         if action == "reset":
             self._runtime_state = "resetting"
+            await self.publish_control_states()
             try:
                 await self.cancel_queued_operations()
                 loop = asyncio.get_running_loop()
@@ -640,6 +658,7 @@ class Experiment(object):
                 await self.enter_fault(f"Recovery reset failed: {error}")
                 return {"ok": False, "error": "reset_failed"}
             self._runtime_state = "ready"
+            await self.publish_control_states()
             await self.publish_state_change(list(self.devices))
             return {"ok": True, "state": "ready"}
         if action == "shutdown":
@@ -816,6 +835,21 @@ class Experiment(object):
             "hasActiveOwner": self.ownership.active_owner is not None,
             "position": position,
         }
+
+    def control_state_for(self, websocket):
+        return {
+            "hasControl": self.can_accept_commands(websocket),
+            "handoffRequired": websocket == self.ownership.handoff_user
+            and self.ownership.handoff_state == "pending",
+            "lifecycle": self._runtime_state,
+        }
+
+    async def send_control_state(self, websocket):
+        await self.send_json_event(websocket, "ownership.control", self.control_state_for(websocket))
+
+    async def publish_control_states(self):
+        for client in list(self.clients):
+            await self.send_control_state(client)
 
     async def send_json_event(self, websocket, name, data):
         if self.uses_json_protocol(websocket):
@@ -1007,6 +1041,7 @@ class Experiment(object):
             logging.info("Shutting down experiment: %s", reason)
             fault_shutdown = self._runtime_state == "faulted" or reason == "fault"
             self._runtime_state = "stopping"
+            await self.publish_control_states()
             self.cancel_handoff_timeout()
             shutdown_error = None
             try:

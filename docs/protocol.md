@@ -113,7 +113,7 @@ Only the server sends `event` frames. `payload.name` identifies the event and
 }
 ```
 
-Version 1 event names include `message`, `command`, `ownership.queue`, `ownership.handoff`,
+Version 1 event names include `message`, `command`, `ownership.queue`, `ownership.control`, `ownership.handoff`,
 `alert`, `state.snapshot`, `state.changed`, `operation.queued`,
 `operation.started`, `operation.completed`, `operation.failed`,
 `reset.started`, `reset.completed`, and `fault`.
@@ -128,6 +128,11 @@ hardware work, reset, recovery, or handoff state changes.
 `ownership.queue` contains `waitingCount`, `hasActiveOwner`, and the recipient's
 own `position` when waiting. It is broadcast on connection, disconnection,
 queue changes, and promotion. It never includes client identities.
+`ownership.control` contains the recipient-specific `hasControl` and
+`handoffRequired` booleans plus the current runtime `lifecycle`; it is sent on
+connection and control/lifecycle transitions. A pending handoff recipient also
+receives `ownership.handoff` with the allowed `choices` (`continue` and
+`reset`) and `timeoutSeconds` before normal command admission resumes.
 Events must not expose passwords, raw device configuration, or internal paths.
 
 ## Debugging

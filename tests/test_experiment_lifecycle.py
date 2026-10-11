@@ -63,6 +63,90 @@ class ExperimentLifecycleTests(unittest.TestCase):
         self.assertEqual(frame["payload"]["data"]["title"], "ReMLA")
         self.assertEqual(frame["payload"]["data"]["message"], "Experiment/controlStatus/1,Ready")
 
+    def test_json_handoff_notification_is_structured(self):
+        class WebSocket:
+            subprotocol = "remla-json-v1"
+
+            def __init__(self):
+                self.frames = []
+
+            async def send(self, frame):
+                self.frames.append(frame)
+
+        websocket = WebSocket()
+        experiment = experiment_module.Experiment("RemoteLabs")
+        experiment.ownership.handoff_user = websocket
+        experiment.ownership.handoff_state = "pending"
+
+        asyncio.run(experiment.notify_handoff_user())
+
+        handoff = experiment_module.json.loads(websocket.frames[1])
+        self.assertEqual(handoff["payload"]["name"], "ownership.handoff")
+        self.assertEqual(handoff["payload"]["data"]["choices"], ["continue", "reset"])
+        self.assertEqual(handoff["payload"]["data"]["timeoutSeconds"], 60)
+
+    def test_json_handoff_notification_updates_control_state(self):
+        class WebSocket:
+            subprotocol = "remla-json-v1"
+
+            def __init__(self):
+                self.frames = []
+
+            async def send(self, frame):
+                self.frames.append(frame)
+
+        websocket = WebSocket()
+        experiment = experiment_module.Experiment("RemoteLabs")
+        experiment.ownership.handoff_user = websocket
+        experiment.ownership.handoff_state = "pending"
+        experiment.schedule_handoff_timeout = mock.Mock()
+
+        asyncio.run(experiment.notify_handoff_user())
+
+        control = experiment_module.json.loads(websocket.frames[0])
+        self.assertEqual(control["payload"]["name"], "ownership.control")
+        self.assertEqual(
+            control["payload"]["data"],
+            {"hasControl": False, "handoffRequired": True, "lifecycle": "new"},
+        )
+
+    def test_json_handoff_reset_publishes_control_lifecycle_transitions(self):
+        class WebSocket:
+            subprotocol = "remla-json-v1"
+
+            def __init__(self):
+                self.frames = []
+
+            async def send(self, frame):
+                self.frames.append(frame)
+
+        websocket = WebSocket()
+        experiment = experiment_module.Experiment("RemoteLabs")
+        experiment._runtime_state = "ready"
+        experiment.clients.append(websocket)
+        experiment.ownership.handoff_user = websocket
+        experiment.ownership.handoff_state = "pending"
+        experiment.ownership._handoff_connected = True
+        loop = mock.Mock()
+        loop.run_in_executor = mock.AsyncMock(return_value=None)
+
+        with mock.patch.object(experiment_module.asyncio, "get_running_loop", return_value=loop):
+            asyncio.run(experiment.processControlCommand("CONTROL/handoff/reset", websocket))
+
+        control_states = [
+            frame["payload"]["data"]
+            for frame in map(experiment_module.json.loads, websocket.frames)
+            if frame["payload"]["name"] == "ownership.control"
+        ]
+        self.assertIn(
+            {"hasControl": False, "handoffRequired": False, "lifecycle": "resetting"},
+            control_states,
+        )
+        self.assertIn(
+            {"hasControl": True, "handoffRequired": False, "lifecycle": "ready"},
+            control_states,
+        )
+
     def test_json_command_without_ownership_returns_correlated_error(self):
         class WebSocket:
             subprotocol = "remla-json-v1"
