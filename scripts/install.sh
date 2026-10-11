@@ -142,7 +142,8 @@ fi
 getent group remlausers >/dev/null || groupadd --system remlausers
 getent group gpio >/dev/null || groupadd --system gpio
 getent group i2c >/dev/null || groupadd --system i2c
-usermod --append --groups remlausers,gpio,i2c "$SERVICE_USER"
+getent group dialout >/dev/null || groupadd --system dialout
+usermod --append --groups remlausers,gpio,i2c,dialout "$SERVICE_USER"
 usermod --append --groups remlausers "$OPERATOR"
 
 install -d -o "$SERVICE_USER" -g remlausers -m 2775 "$INSTALL_ROOT"

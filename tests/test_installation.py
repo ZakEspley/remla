@@ -17,8 +17,8 @@ MAIN = ROOT / "remla" / "main.py"
 
 class PiInstallerTests(unittest.TestCase):
     def test_release_version_is_consistent(self):
-        self.assertIn('version = "0.4.3"', PYPROJECT.read_text())
-        self.assertIn('__version__ = "0.4.3"', MAIN.read_text())
+        self.assertIn('version = "0.4.4"', PYPROJECT.read_text())
+        self.assertIn('__version__ = "0.4.4"', MAIN.read_text())
 
     def test_installed_environment_uses_shared_configuration_paths(self):
         result = subprocess.run(
@@ -48,7 +48,7 @@ class PiInstallerTests(unittest.TestCase):
 
     def test_dry_run_uses_local_wheel_and_dedicated_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
-            wheel = Path(directory) / "remla-0.4.3-py3-none-any.whl"
+            wheel = Path(directory) / "remla-0.4.4-py3-none-any.whl"
             wheel.touch()
 
             result = subprocess.run(
@@ -61,7 +61,7 @@ class PiInstallerTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("/opt/remla/releases/0.4.3", result.stdout)
+        self.assertIn("/opt/remla/releases/0.4.4", result.stdout)
         self.assertIn("/usr/local/bin/remla", result.stdout)
         self.assertIn("remla.service", result.stdout)
         self.assertIn("operator pi", result.stdout)
@@ -99,6 +99,11 @@ class PiInstallerTests(unittest.TestCase):
         self.assertIn("chown -R root:root /var/www/remla", content)
         self.assertIn("find /var/www/remla -type d -exec chmod 0755 {} +", content)
         self.assertIn("find /var/www/remla -type f -exec chmod 0644 {} +", content)
+
+    def test_installer_grants_the_service_user_serial_device_access(self):
+        content = INSTALLER.read_text()
+
+        self.assertIn('usermod --append --groups remlausers,gpio,i2c,dialout "$SERVICE_USER"', content)
 
 
 class PackageBuildTests(unittest.TestCase):

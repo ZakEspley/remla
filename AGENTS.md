@@ -49,6 +49,7 @@
 - Many commands assume Raspberry Pi OS and hardware access.
 - Some commands must run as root; follow existing checks (os.geteuid()).
 - System services (nginx, mediamtx, pigpiod) are managed via systemctl.
+- The release installer adds the `remla` service account to `gpio`, `i2c`, and `dialout`; USB VISA instruments require the `dialout` membership.
 - Avoid destructive changes to `/boot/firmware/config.txt` unless explicitly required.
 
 ## Code style (Python)
