@@ -82,6 +82,7 @@
 - Prefer returning booleans for simple checks (e.g., is_package_installed).
 - Log unexpected exceptions in long-running services (see Experiment.logException).
 - Foreground runs fall back to the calling user's state log directory if the configured service log directory is not writable.
+- `remla run -f` writes service and camera logging to the invoking terminal; service mode retains journal/file logging.
 
 ## Logging
 - Use `logging` for service-level events and file logs.

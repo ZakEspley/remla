@@ -64,13 +64,13 @@ def resolve_i2c_bus(bus):
     return matches[0]
 
 
-def get_camera_logger() -> logging.Logger:
+def get_camera_logger(console=False) -> logging.Logger:
     """Return a configured logger that writes to `logsDirectory / 'camera_cycle.log'`.
     Creates the logs directory if needed and ensures the handler isn't duplicated.
     """
     logger = logging.getLogger("remla.camera_cycle")
     if not logger.handlers:
-        handler = logging.FileHandler(get_writable_log_path("camera_cycle.log"))
+        handler = logging.StreamHandler() if console else logging.FileHandler(get_writable_log_path("camera_cycle.log"))
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)

@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import json
+import logging
 import os
 import re
 import shutil
@@ -9,6 +10,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -943,6 +945,8 @@ def run(
     if foreground or wstest:
         pidFilePath.parent.mkdir(parents=True, exist_ok=True)
         pidFilePath.write_text(str(os.getpid()))
+    if foreground:
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
 
     def cleanup_startup_pid(signum, frame):
         pidFilePath.unlink(missing_ok=True)
@@ -952,7 +956,7 @@ def run(
     signal.signal(signal.SIGINT, cleanup_startup_pid)
     # perform initial camera cycling once per boot (if configured)
     cycle_camera = get_boot_status()
-    logger = get_camera_logger()
+    logger = get_camera_logger(console=foreground)
     if cycle_camera:
         rprint("Performing initial camera cycle (per‑boot) before starting service...") 
         logger.info("""
