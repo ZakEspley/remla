@@ -98,7 +98,7 @@ wheel on a dedicated test Pi:
 ```bash
 uv sync
 uv build
-sudo ./scripts/install.sh --wheel dist/remla-0.4.0.dev0-py3-none-any.whl
+sudo ./scripts/install.sh --wheel dist/remla-0.4.0-py3-none-any.whl
 ```
 
 Use `--dry-run` to inspect the local-wheel installation plan without changing

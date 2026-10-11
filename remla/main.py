@@ -38,7 +38,7 @@ from remla.yaml import createDevicesFromYml, yaml
 
 from .customvalidators import *
 
-__version__ = "0.4.0.dev0"
+__version__ = "0.4.0"
 cameraSetupLockPath = Path("/run/remla-camera-setup.lock")
 
 
