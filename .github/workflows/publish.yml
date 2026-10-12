@@ -55,6 +55,7 @@ jobs:
           tests.test_controller_safety
           tests.test_installation
           tests.test_release
+          tests.test_web_deployment
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

@@ -17,8 +17,8 @@ MAIN = ROOT / "remla" / "main.py"
 
 class PiInstallerTests(unittest.TestCase):
     def test_release_version_is_consistent(self):
-        self.assertIn('version = "0.4.4"', PYPROJECT.read_text())
-        self.assertIn('__version__ = "0.4.4"', MAIN.read_text())
+        self.assertIn('version = "0.4.5"', PYPROJECT.read_text())
+        self.assertIn('__version__ = "0.4.5"', MAIN.read_text())
 
     def test_installed_environment_uses_shared_configuration_paths(self):
         result = subprocess.run(
@@ -48,7 +48,7 @@ class PiInstallerTests(unittest.TestCase):
 
     def test_dry_run_uses_local_wheel_and_dedicated_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
-            wheel = Path(directory) / "remla-0.4.4-py3-none-any.whl"
+            wheel = Path(directory) / "remla-0.4.5-py3-none-any.whl"
             wheel.touch()
 
             result = subprocess.run(
@@ -61,7 +61,7 @@ class PiInstallerTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("/opt/remla/releases/0.4.4", result.stdout)
+        self.assertIn("/opt/remla/releases/0.4.5", result.stdout)
         self.assertIn("/usr/local/bin/remla", result.stdout)
         self.assertIn("remla.service", result.stdout)
         self.assertIn("operator pi", result.stdout)
@@ -85,6 +85,7 @@ class PiInstallerTests(unittest.TestCase):
         self.assertIn("dist/install.sh", content)
         self.assertIn("dist/requirements.txt", content)
         self.assertIn("dist/SHA256SUMS", content)
+        self.assertIn("tests.test_web_deployment", content)
 
     def test_installer_copies_local_assets_before_service_user_installs_them(self):
         content = INSTALLER.read_text()

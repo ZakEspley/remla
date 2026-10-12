@@ -7,7 +7,20 @@ from unittest import mock
 from remla.web_deployment import set_website_permissions
 
 
+READER = Path(__file__).resolve().parents[1] / "remla" / "setup" / "reader.js"
+
+
 class WebsiteDeploymentTests(unittest.TestCase):
+    def test_mediamtx_reader_cancels_startup_after_close(self):
+        content = READER.read_text()
+
+        self.assertIn("start = async ()", content)
+        self.assertIn("if (this.state === 'closed')", content)
+        self.assertIn("const sessionUrl =", content)
+        self.assertIn("fetch(sessionUrl", content)
+        self.assertIn("this.generation", content)
+        self.assertIn("isCurrent = (generation)", content)
+
     def test_web_root_is_readable_by_nginx_after_deployment(self):
         with tempfile.TemporaryDirectory() as directory:
             website = Path(directory) / "website"

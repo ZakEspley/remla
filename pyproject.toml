@@ -1,6 +1,6 @@
 [project]
 name = "remla"
-version = "0.4.4"
+version = "0.4.5"
 description = "Remote control service for Raspberry Pi laboratory hardware"
 authors = [{name = "Zak Espley", email = "zespley@gmail.com"}]
 readme = "README.md"

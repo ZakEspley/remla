@@ -279,12 +279,17 @@
       this.sessionUrl = null;
       this.queuedCandidates = [];
       this.nonAdvertisedCodecs = [];
+      this.generation = 0;
 
       this.start();
     }
 
-    handleError = (err) => {
-      if (this.state === 'restarting' || this.state === 'closed') {
+    isCurrent = (generation) => (
+      this.state === 'running' && this.generation === generation
+    );
+
+    handleError = (err, generation = this.generation) => {
+      if (!this.isCurrent(generation)) {
         return;
       }
 
@@ -304,6 +309,7 @@
 
       this.queuedCandidates = [];
 
+      this.generation += 1;
       this.state = 'restarting';
 
       this.restartTimeout = window.setTimeout(() => {
@@ -318,6 +324,7 @@
 
     close = () => {
       this.state = 'closed';
+      this.generation += 1;
 
       if (this.restartTimeout !== null) {
         window.clearTimeout(this.restartTimeout);
@@ -354,16 +361,30 @@
         });
     };
 
-    start = () => {
+    start = async () => {
+      if (this.state === 'closed') {
+        return;
+      }
+      const generation = ++this.generation;
       this.state = 'running';
 
-      this.requestICEServers()
-        .then((iceServers) => this.setupPeerConnection(iceServers))
-        .then((offer) => this.sendOffer(offer))
-        .then((answer) => this.setAnswer(answer))
-        .catch((err) => {
-          this.handleError(err.toString());
-        });
+      try {
+        const iceServers = await this.requestICEServers();
+        if (!this.isCurrent(generation)) {
+          return;
+        }
+        const offer = await this.setupPeerConnection(iceServers, generation);
+        if (!offer || !this.isCurrent(generation)) {
+          return;
+        }
+        const answer = await this.sendOffer(offer, generation);
+        if (!answer || !this.isCurrent(generation)) {
+          return;
+        }
+        await this.setAnswer(answer, generation);
+      } catch (err) {
+        this.handleError(err.toString(), generation);
+      }
     };
 
     requestICEServers = () => {
@@ -373,31 +394,39 @@
         .then((res) => linkToIceServers(res.headers.get('Link')))
     };
 
-    setupPeerConnection = (iceServers) => {
-      this.pc = new RTCPeerConnection({
+    setupPeerConnection = (iceServers, generation) => {
+      if (!this.isCurrent(generation)) {
+        return null;
+      }
+      const pc = new RTCPeerConnection({
         iceServers,
         // https://webrtc.org/getting-started/unified-plan-transition-guide
         sdpSemantics: 'unified-plan',
       });
 
       const direction = 'recvonly';
-      this.pc.addTransceiver('video', { direction });
+      this.pc = pc;
+      pc.addTransceiver('video', { direction });
 
-      this.pc.onicecandidate = (evt) => this.onLocalCandidate(evt);
-      this.pc.oniceconnectionstatechange = () => this.onConnectionState();
-      this.pc.ontrack = (evt) => this.onTrack(evt);
+      pc.onicecandidate = (evt) => this.onLocalCandidate(evt, generation);
+      pc.oniceconnectionstatechange = () => this.onConnectionState(generation);
+      pc.ontrack = (evt) => this.onTrack(evt, generation);
 
-      return this.pc.createOffer()
+      return pc.createOffer()
         .then((offer) => {
+          if (!this.isCurrent(generation)) {
+            pc.close();
+            return null;
+          }
           offer.sdp = editOffer(offer.sdp, this.nonAdvertisedCodecs);
           this.offerData = parseOffer(offer.sdp);
 
-          return this.pc.setLocalDescription(offer)
-            .then(() => offer.sdp);
+          return pc.setLocalDescription(offer)
+            .then(() => this.isCurrent(generation) ? offer.sdp : null);
         });
     };
 
-    sendOffer = (offer) => {
+    sendOffer = (offer, generation) => {
       return fetch(this.conf.url, {
         method: 'POST',
         headers: {'Content-Type': 'application/sdp'},
@@ -415,14 +444,21 @@
             throw new Error(`bad status code ${res.status}`);
           }
 
-          this.sessionUrl = new URL(res.headers.get('location'), this.conf.url).toString();
+          const sessionUrl = new URL(res.headers.get('location'), this.conf.url).toString();
+          if (!this.isCurrent(generation)) {
+            fetch(sessionUrl, {
+              method: 'DELETE',
+            });
+            return null;
+          }
+          this.sessionUrl = sessionUrl;
 
           return res.text();
         });
     };
 
-    setAnswer = (answer) => {
-      if (this.state !== 'running') {
+    setAnswer = (answer, generation) => {
+      if (!this.isCurrent(generation)) {
         return;
       }
 
@@ -431,15 +467,15 @@
         sdp: answer,
       }))
         .then(() => {
-          if (this.queuedCandidates.length !== 0) {
-            this.sendLocalCandidates(this.queuedCandidates);
+          if (this.isCurrent(generation) && this.queuedCandidates.length !== 0) {
+            this.sendLocalCandidates(this.queuedCandidates, generation);
             this.queuedCandidates = [];
           }
         });
     };
 
-    onLocalCandidate = (evt) => {
-      if (this.state !== 'running') {
+    onLocalCandidate = (evt, generation) => {
+      if (!this.isCurrent(generation)) {
         return;
       }
 
@@ -447,12 +483,12 @@
         if (this.sessionUrl === null) {
           this.queuedCandidates.push(evt.candidate);
         } else {
-          this.sendLocalCandidates([evt.candidate]);
+          this.sendLocalCandidates([evt.candidate], generation);
         }
       }
     };
 
-    sendLocalCandidates = (candidates) => {
+    sendLocalCandidates = (candidates, generation) => {
       fetch(this.sessionUrl, {
         method: 'PATCH',
         headers: {
@@ -472,22 +508,22 @@
           }
         })
         .catch((err) => {
-          this.handleError(err.toString());
+          this.handleError(err.toString(), generation);
         });
     };
 
-    onConnectionState = () => {
-      if (this.state !== 'running') {
+    onConnectionState = (generation) => {
+      if (!this.isCurrent(generation)) {
         return;
       }
 
       if (this.pc.iceConnectionState === 'failed') {
-        this.handleError('peer connection closed');
+        this.handleError('peer connection closed', generation);
       }
     };
 
-    onTrack = (evt) => {
-      if (this.conf.onTrack !== undefined) {
+    onTrack = (evt, generation) => {
+      if (this.isCurrent(generation) && this.conf.onTrack !== undefined) {
         this.conf.onTrack(evt);
       }
     };
