@@ -16,6 +16,7 @@ from urllib.parse import quote
 from urllib.request import urlopen
 
 import websockets
+from websockets.exceptions import ConnectionClosed
 
 from remla.command_scheduler import CommandScheduler
 from remla.runtime_operations import (
@@ -117,6 +118,7 @@ class Experiment(object):
         self._handoff_timeout_task = None
         self._client_command_tasks = {}
         self._operation_tasks = {}
+        self._state_publish_lock = asyncio.Lock()
 
         self.initializedStates = False
         self.admin = admin
@@ -293,7 +295,14 @@ class Experiment(object):
             await self.publish_queue_state()
             async for command in websocket:
                 if self.uses_json_protocol(websocket):
-                    await self.process_json_frame(command, websocket)
+                    if self.is_json_handoff_frame(command):
+                        await self.process_json_frame(command, websocket)
+                        continue
+                    if len(self._client_command_tasks.get(websocket, ())) >= self.max_outstanding_operations:
+                        await self.reject_json_dispatch_limit(command, websocket)
+                        continue
+                    task = asyncio.create_task(self.process_json_frame(command, websocket))
+                    self.track_client_command_task(websocket, task)
                     continue
                 if command.startswith("CONTROL/handoff/"):
                     await self.processControlCommand(command, websocket)
@@ -307,8 +316,35 @@ class Experiment(object):
                         )
                     )
         finally:
+            if websocket != self.ownership.active_owner:
+                tasks = list(self._client_command_tasks.get(websocket, ()))
+                for task in tasks:
+                    task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
             self.clients.remove(websocket)  # Remove client that closed connection
             await self.disconnect_client(websocket)
+
+    def is_json_handoff_frame(self, frame):
+        try:
+            message = json.loads(frame)
+        except (TypeError, ValueError):
+            return False
+        payload = message.get("payload") if isinstance(message, dict) else None
+        return (isinstance(payload, dict)
+                and payload.get("deviceName") == "Experiment"
+                and payload.get("commandName") == "handoff")
+
+    async def reject_json_dispatch_limit(self, frame, websocket):
+        try:
+            message_id = json.loads(frame)["meta"]["messageId"]
+            uuid.UUID(message_id)
+        except (TypeError, KeyError, ValueError, AttributeError, json.JSONDecodeError):
+            message_id = None
+        await self.send_json_result(
+            websocket, message_id, 429, False,
+            "outstanding_operation_limit", "Too many commands in progress",
+        )
 
     async def process_json_frame(self, frame, websocket):
         try:
@@ -361,6 +397,22 @@ class Experiment(object):
             return
         try:
             await self.runDeviceMethod(device_name, command_name, arguments, websocket)
+        except asyncio.CancelledError:
+            if websocket in self.clients:
+                task = asyncio.create_task(
+                    self.send_json_result(
+                        websocket, message_id, 409, False,
+                        "operation_cancelled", "Command cancelled before execution",
+                    )
+                )
+                self.track_client_command_task(websocket, task)
+            raise
+        except CommandAdmissionError:
+            await self.send_json_result(websocket, message_id, 403, False, "not_owner", "The lab is not accepting commands")
+            return
+        except OutstandingOperationLimit:
+            await self.send_json_result(websocket, message_id, 429, False, "outstanding_operation_limit", "Too many commands in progress")
+            return
         except (AttributeError, ValueError) as error:
             await self.send_json_result(websocket, message_id, 400, False, "invalid_parameters", str(error))
             return
@@ -795,7 +847,7 @@ class Experiment(object):
     async def sendDataToClient(self, websocket, dataStr: str):
         try:
             await websocket.send(dataStr)
-        except websockets.exceptions.ConnectionClosed:
+        except ConnectionClosed:
             logging.warning(
                 f"Failed to send message: {dataStr} - Connection was closed."
             )
@@ -856,22 +908,24 @@ class Experiment(object):
             await self.sendDataToClient(websocket, self.json_event_frame(name, data))
 
     async def send_state_snapshot(self, websocket):
-        await self.send_json_event(
-            websocket,
-            "state.snapshot",
-            {
-                "revision": self.state_revision,
-                "lifecycle": self._runtime_state,
-                "devices": self.public_device_states(),
-                "lastFault": self.last_fault,
-            },
-        )
+        async with self._state_publish_lock:
+            await self.send_json_event(
+                websocket,
+                "state.snapshot",
+                {
+                    "revision": self.state_revision,
+                    "lifecycle": self._runtime_state,
+                    "devices": self.public_device_states(),
+                    "lastFault": self.last_fault,
+                },
+            )
 
     async def publish_state_change(self, device_names):
-        self.state_revision += 1
-        data = {"revision": self.state_revision, "devices": self.public_device_states(device_names)}
-        for client in list(self.clients):
-            await self.send_json_event(client, "state.changed", data)
+        async with self._state_publish_lock:
+            self.state_revision += 1
+            data = {"revision": self.state_revision, "devices": self.public_device_states(device_names)}
+            for client in list(self.clients):
+                await self.send_json_event(client, "state.changed", data)
 
     async def publish_queue_state(self):
         for client in list(self.clients):

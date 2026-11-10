@@ -17,8 +17,8 @@ MAIN = ROOT / "remla" / "main.py"
 
 class PiInstallerTests(unittest.TestCase):
     def test_release_version_is_consistent(self):
-        self.assertIn('version = "0.4.5"', PYPROJECT.read_text())
-        self.assertIn('__version__ = "0.4.5"', MAIN.read_text())
+        self.assertIn('version = "0.4.6"', PYPROJECT.read_text())
+        self.assertIn('__version__ = "0.4.6"', MAIN.read_text())
 
     def test_installed_environment_uses_shared_configuration_paths(self):
         result = subprocess.run(

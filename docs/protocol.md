@@ -82,6 +82,12 @@ Every accepted or rejected command receives one `result` frame with its
 }
 ```
 
+The server may run commands in different named lock groups concurrently on the
+same owner connection. Results can arrive out of submission order; match them
+by `replyId`. Commands in one lock group remain serialized. State-change
+revisions remain ordered for JSON clients. This does not establish whether
+simultaneous movement is physically safe on a particular lab.
+
 Failures use `ok: false` and a stable `error.code`:
 
 ```json
@@ -97,8 +103,10 @@ Failures use `ok: false` and a stable `error.code`:
 
 Status values follow HTTP classes: `2xx` success, `4xx` client error, and
 `5xx` server error. Stable codes include `not_owner`, `invalid_parameters`,
-`unknown_command`, `device_faulted`, and `internal_error`. Messages must be
-operator-safe and never include secrets or full device configuration.
+`unknown_command`, `device_faulted`, `operation_cancelled` (409) for a queued
+command cancelled by a lifecycle transition, `outstanding_operation_limit`
+(429), and `internal_error`. Messages must be operator-safe and never include
+secrets or full device configuration.
 
 ## Events
 
