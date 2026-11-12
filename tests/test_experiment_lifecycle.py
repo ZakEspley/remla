@@ -609,6 +609,50 @@ class ExperimentCommandOperationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(operations[0].status, "completed")
         experiment.sendMessage.assert_awaited_once_with("owner", "camera:capture:now")
 
+    async def test_motor_limit_alert_is_readable_for_json_and_unchanged_for_legacy(self):
+        class Device:
+            name = "Motor"
+
+            def cmdHandler(self, method, params, device_name):
+                return "ALERT", f"{device_name}/position/limit"
+
+        class WebSocket:
+            def __init__(self, subprotocol):
+                self.subprotocol = subprotocol
+                self.frames = []
+
+            async def send(self, frame):
+                self.frames.append(frame)
+
+        async def run_in_executor(executor, func, *args):
+            return func(*args)
+
+        for subprotocol in ("remla-json-v1", None):
+            with self.subTest(subprotocol=subprotocol):
+                websocket = WebSocket(subprotocol)
+                experiment = experiment_module.Experiment("RemoteLabs")
+                experiment._runtime_state = "ready"
+                experiment.ownership.connect(websocket)
+                device = Device()
+                experiment.addDevice(device)
+                experiment.addLockGroup("motor", [device])
+                loop = mock.Mock()
+                loop.run_in_executor = mock.AsyncMock(side_effect=run_in_executor)
+
+                with mock.patch.object(experiment_module.asyncio, "get_event_loop", return_value=loop):
+                    await experiment.runDeviceMethod("Motor", "move", ["10"], websocket)
+
+                if subprotocol is None:
+                    self.assertEqual(websocket.frames, ["ALERT: Motor/position/limit"])
+                else:
+                    frame = experiment_module.json.loads(websocket.frames[0])
+                    self.assertEqual(frame["payload"]["name"], "alert")
+                    self.assertEqual(frame["payload"]["data"], {
+                        "severity": "warning",
+                        "title": "Limit Reached",
+                        "message": "Stop! The motor can't move any further in this direction",
+                    })
+
     def test_lock_group_validation_requires_each_device_exactly_once(self):
         first = mock.Mock(name="first")
         first.name = "first"

@@ -761,7 +761,16 @@ class Experiment(object):
         if result is not None:
             logging.info(f"Device {deviceName} ran {method} with result: {result}")
             if response_type == "ALERT":
-                await self.sendAlert(websocket, f"{result}")
+                if result == f"{deviceName}/position/limit":
+                    await self.sendAlert(
+                        websocket,
+                        result,
+                        severity="warning",
+                        title="Limit Reached",
+                        message="Stop! The motor can't move any further in this direction",
+                    )
+                else:
+                    await self.sendAlert(websocket, f"{result}")
             else:
                 await self.sendMessage(websocket, f"{result}")
         else:
@@ -958,13 +967,19 @@ class Experiment(object):
         updatedMessage = f"MESSAGE: {message}"
         await self.sendDataToClient(websocket, updatedMessage)
 
-    async def sendAlert(self, websocket, alertMsg: str):
+    async def sendAlert(
+        self, websocket, alertMsg: str, *, severity="info", title="ReMLA", message=None
+    ):
         if self.uses_json_protocol(websocket):
             await self.sendDataToClient(
                 websocket,
                 self.json_event_frame(
                     "alert",
-                    {"severity": "info", "title": "ReMLA", "message": alertMsg},
+                    {
+                        "severity": severity,
+                        "title": title,
+                        "message": message if message is not None else alertMsg,
+                    },
                 ),
             )
             return

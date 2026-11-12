@@ -126,7 +126,14 @@ Version 1 event names include `message`, `command`, `ownership.queue`, `ownershi
 `operation.started`, `operation.completed`, `operation.failed`,
 `reset.started`, `reset.completed`, and `fault`.
 
-`alert.data` contains `severity`, `title`, and `message`. `state.snapshot`
+`alert.data` contains `severity`, `title`, and `message`.
+
+For a motor controller's `<device>/position/limit` alert, JSON clients receive
+`severity: "warning"`, `title: "Limit Reached"`, and the user-facing message
+`Stop! The motor can't move any further in this direction`; legacy clients
+continue to receive the original `ALERT: <device>/position/limit` frame.
+
+`state.snapshot`
 contains a monotonic `revision`, lifecycle, public device state, and last fault.
 It is sent to every JSON connection. `state.changed` contains the next revision
 and one or more changed public device states; clients request a new snapshot
