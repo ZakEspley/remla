@@ -69,6 +69,32 @@ For positional controller parsers, clients use `{"arguments": ["value"]}`.
 The special `Experiment` / `handoff` command accepts
 `{"choice": "continue"}` or `{"choice": "reset"}`.
 
+### Shared presentation state
+
+Any JSON frontend may publish **public UI presentation choices** with the
+owner-only `Experiment` / `set_ui_state` command:
+
+```json
+{"deviceName": "Experiment", "commandName": "set_ui_state", "parameters": {"namespace": "photoelectric", "values": {"selectedTool": "potentiometer", "potInterval": "36"}}}
+```
+
+Send this as the `payload` of a normal version-1 `command` frame with a UUID
+`meta.messageId`. The `values` object **replaces** the namespace's previous
+values; `{}` removes that namespace. Only the active controller in the `ready`
+lifecycle can publish; waiting, handoff-pending, faulted, and legacy clients
+cannot. A write receives a correlated result (`200` on success, `403`
+`not_owner`, or `400` `invalid_parameters`). No device method runs.
+
+Namespaces start with an ASCII letter and contain at most 32 ASCII letters,
+digits, `_` or `-`; keys start with an ASCII letter and contain at most 48
+ASCII letters, digits, `.`, `_` or `-`. A lab holds at most 8 namespaces,
+each with at most 16 keys. Values are flat JSON scalars (`string` of at most
+80 characters, finite number, boolean, or null), not objects or arrays.
+The serialized `parameters` object must fit within 2048 UTF-8 bytes. Store
+only safe-to-share display choices here: no credentials, private user data,
+device commands, or inferred hardware status. Confirmed device state still
+comes from `state.snapshot` / `state.changed`.
+
 ## Results and errors
 
 Every accepted or rejected command receives one `result` frame with its
@@ -122,7 +148,7 @@ Only the server sends `event` frames. `payload.name` identifies the event and
 ```
 
 Version 1 event names include `message`, `command`, `ownership.queue`, `ownership.control`, `ownership.handoff`,
-`alert`, `state.snapshot`, `state.changed`, `operation.queued`,
+`alert`, `state.snapshot`, `state.changed`, `ui.state.snapshot`, `ui.state.changed`, `operation.queued`,
 `operation.started`, `operation.completed`, `operation.failed`,
 `reset.started`, `reset.completed`, and `fault`.
 
@@ -139,6 +165,15 @@ It is sent to every JSON connection. `state.changed` contains the next revision
 and one or more changed public device states; clients request a new snapshot
 after a revision gap. Snapshots and changes are published only after successful
 hardware work, reset, recovery, or handoff state changes.
+
+`ui.state.snapshot` is sent on JSON connection; `ui.state.changed` is sent to
+all JSON clients after an owner update or a clear on owner disconnect/fault.
+Both carry the **complete** UI map, for example
+`{"revision": 2, "namespaces": {"photoelectric": {"selectedTool": "filter-wheel"}}}`.
+Its revision is monotonic and independent of device-state revisions. The map
+starts empty each time the service starts; it is not persisted. Viewers may
+ignore these events or offer an optional follow mode, but must not send
+hardware commands while waiting. Legacy frames are unchanged.
 
 `ownership.queue` contains `waitingCount`, `hasActiveOwner`, and the recipient's
 own `position` when waiting. It is broadcast on connection, disconnection,

@@ -27,6 +27,7 @@ from remla.runtime_operations import (
 )
 from remla.settings import *
 from remla.runtime_state import RuntimeStateStore, StateWriteError
+from remla.ui_state import UIState
 
 
 class NoDeviceError(Exception):
@@ -119,6 +120,8 @@ class Experiment(object):
         self._client_command_tasks = {}
         self._operation_tasks = {}
         self._state_publish_lock = asyncio.Lock()
+        self._ui_state_publish_lock = asyncio.Lock()
+        self.ui_state = UIState()
 
         self.initializedStates = False
         self.admin = admin
@@ -291,6 +294,7 @@ class Experiment(object):
                     "Experiment/controlStatus/0,You are connected but do not have control of the lab equipment.",
                 )
             await self.send_state_snapshot(websocket)
+            await self.send_ui_state_snapshot(websocket)
             await self.send_control_state(websocket)
             await self.publish_queue_state()
             async for command in websocket:
@@ -382,6 +386,23 @@ class Experiment(object):
                 await self.send_json_result(websocket, message_id, 403, False, "not_owner", "Handoff choice was not accepted")
             return
 
+        if device_name == "Experiment" and command_name == "set_ui_state":
+            if not self.can_accept_commands(websocket):
+                await self.send_json_result(websocket, message_id, 403, False, "not_owner", "You do not have control of the lab.")
+                return
+            async with self._ui_state_publish_lock:
+                if not self.can_accept_commands(websocket):
+                    await self.send_json_result(websocket, message_id, 403, False, "not_owner", "You do not have control of the lab.")
+                    return
+                try:
+                    self.ui_state.update(parameters)
+                except ValueError as error:
+                    await self.send_json_result(websocket, message_id, 400, False, "invalid_parameters", str(error))
+                    return
+                await self.publish_ui_state_change()
+            await self.send_json_result(websocket, message_id, 200, True, message="UI state updated")
+            return
+
         if not self.can_accept_commands(websocket):
             await self.send_json_result(websocket, message_id, 403, False, "not_owner", "You do not have control of the lab.")
             return
@@ -448,6 +469,7 @@ class Experiment(object):
             self.activeClient = None
 
             self._runtime_state = "draining"
+            self.clear_ui_state()
             await self.publish_control_states()
 
         previous_handoff_user = self.ownership.handoff_user
@@ -676,7 +698,7 @@ class Experiment(object):
     async def enter_fault(self, message):
         self._runtime_state = "faulted"
         self.last_fault = message
-        await self.publish_control_states()
+        self.clear_ui_state()
         await self.cancel_queued_operations()
         if self.executor is not None:
             loop = asyncio.get_running_loop()
@@ -684,6 +706,7 @@ class Experiment(object):
                 await loop.run_in_executor(self.executor, self.safeStopExperiment)
             except Exception as error:
                 logging.error("Safe stop failed while entering fault: %s", error)
+        await self.publish_control_states()
         await self.sendCommandToAllClients(f"fault/{message}")
         await self.publish_state_change(list(self.devices))
 
@@ -928,6 +951,24 @@ class Experiment(object):
                     "lastFault": self.last_fault,
                 },
             )
+
+    async def send_ui_state_snapshot(self, websocket):
+        async with self._ui_state_publish_lock:
+            await self.send_json_event(websocket, "ui.state.snapshot", self.ui_state.snapshot())
+
+    async def publish_ui_state_change(self):
+        data = self.ui_state.snapshot()
+        for client in list(self.clients):
+            await self.send_json_event(client, "ui.state.changed", data)
+
+    async def publish_ui_state_change_after_clear(self):
+        async with self._ui_state_publish_lock:
+            await self.publish_ui_state_change()
+
+    def clear_ui_state(self):
+        if self.ui_state.clear():
+            task = asyncio.create_task(self.publish_ui_state_change_after_clear())
+            task.add_done_callback(self.logException)
 
     async def publish_state_change(self, device_names):
         async with self._state_publish_lock:

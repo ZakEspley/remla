@@ -120,6 +120,48 @@ Hardware-free tests do not validate GPIO, camera, systemd, nginx, MediaMTX, or
 physical safe-stop behavior. Perform the hardware checks in `roadmap.md` on a
 dedicated Pi before publishing a stable release.
 
+### Local OpenCode sandbox for both projects
+
+From this checkout, use the workstation's ReMLA-specific `srt` profile to allow
+OpenCode to edit both this repository and `~/Projects/remoteLabs`:
+
+```bash
+srt --settings "$HOME/.config/srt/remla.json" -- opencode --standalone --auto
+```
+
+The profile is stored **outside** both writable repositories so an agent cannot
+change its own sandbox policy. It also retains the usual OpenCode data/cache
+write paths, provider-network allowlist, and Linux seccomp helper. Plain
+`srt -- opencode ...` loads `~/.srt-settings.json` instead and does **not** grant
+ReMLA sessions write access to `remoteLabs`. This is a workstation-local
+workflow, not a deployable Raspberry Pi setting. Other OpenCode permission
+rules may still require approval unless `--auto` is used.
+
+The ReMLA-specific profile also allows `photo1.inst.physics.ucsb.edu:22`
+(TCP port 22, intended for SSH), not other hosts or ports. Plain `ssh` does not
+use `srt`'s proxy, and DNS inside this sandbox is unavailable. To route a
+**direct SSH** session through the same proxy used for Git-over-SSH, use the
+user-owned, read-only-to-sandbox helper (replace `USER` with the Pi account):
+
+```bash
+srt --settings "$HOME/.config/srt/remla.json" -- \
+  python "$HOME/.local/lib/srt/direct-ssh.py" USER@photo1.inst.physics.ucsb.edu
+```
+
+The helper accepts only the photo1 destination and srt's expected proxy
+command; it uses `-F /dev/null` to skip a Nix-store system SSH include whose
+root ownership is remapped to `nobody` inside the sandbox. The host's actual
+system SSH config is root-owned and read-only, not world-writable. The helper
+requires strict host-key verification against the existing `~/.ssh/known_hosts`
+entry.
+The profile allows reading **only** that public host-key file under `~/.ssh`:
+private keys, user SSH config, and the SSH agent remain unavailable. Host-key
+verification and the proxy settings were checked locally, but the Pi was not
+contacted. Authentication may require a separate, reviewed method. Do not
+disable host-key checks or grant access to keys/agent sockets just to make it
+connect. Because `-F /dev/null` also skips normal SSH settings, supply an
+explicit `USER@` destination and do not assume SSH aliases or identity settings.
+
 ## MediaMTX
 
 `sudo remla mediamtx update` remains a direct administrative maintenance command
