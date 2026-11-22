@@ -23,6 +23,7 @@ from rich.text import Text
 from typing_extensions import Annotated
 
 from remla import i2ccmd, setupcmd
+from remla.camera_diagnostics import check_picamera2_runtime, list_camera_modes, require_idle_services
 from remla.labcontrol.Controllers import *
 from remla.labcontrol.Experiment import Experiment
 from remla.mediamtx import MediaMTXInstallError, install_latest
@@ -184,6 +185,35 @@ def install_overlays():
         raise typer.Abort()
 
     _install_remla_overlays()
+
+
+@camera_app.command("check", help="Check Picamera2 imports in this ReMLA runtime without opening a camera.")
+def camera_check():
+    try:
+        version = check_picamera2_runtime()
+    except RuntimeError as error:
+        alert(str(error))
+        raise typer.Abort() from error
+    typer.echo(f"Picamera2 is importable in this ReMLA runtime ({version}); camera access was not tested.")
+
+
+@camera_app.command("modes", help="List sensor modes only while the camera is safely idle.")
+def camera_modes(
+    camera_index: Annotated[
+        int, typer.Option("--camera-index", min=0, help="Currently routed sensor index (default: 0).")
+    ] = 0,
+):
+    warning("Mode discovery opens the camera. Ensure all other camera users are stopped.")
+    try:
+        require_idle_services()
+        result = list_camera_modes(camera_index)
+    except RuntimeError as error:
+        alert(str(error))
+        raise typer.Abort() from error
+    typer.echo(f"Camera {camera_index}: {result['sensor']} (currently routed sensor only)")
+    for mode in result["modes"]:
+        typer.echo(f"  {mode['size'][0]}x{mode['size'][1]}  {mode['bit_depth']}-bit  {mode['format']}")
+    typer.echo("Bit depth describes the sensor mode, not the JPEG or processed PNG output.")
 
 
 @camera_app.command("init", help="Initialize the configured multi-camera mux by setting its GPIO and I2C channel.")
@@ -571,6 +601,23 @@ def mediamtx_update():
 
     logsDirectory.mkdir(parents=True, exist_ok=True)
     _mediamtx()
+
+
+@mediamtx_app.command("stop", help="Stop MediaMTX; interrupts the live camera stream, not ReMLA.")
+def mediamtx_stop():
+    if os.geteuid() != 0:
+        alert("This command must be run as root.")
+        typer.echo("Try running:")
+        typer.echo("sudo remla mediamtx stop")
+        raise typer.Abort()
+
+    warning("Stopping MediaMTX interrupts the live camera stream; ReMLA is not stopped.")
+    try:
+        subprocess.run(["systemctl", "stop", "mediamtx.service"], check=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        alert(f"Could not stop MediaMTX: {error}")
+        raise typer.Abort() from error
+    success("Stopped MediaMTX")
 
 
 def _nginx():

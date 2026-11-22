@@ -8,7 +8,7 @@ ConditionPathExists=!/run/remla-camera-setup.lock
 Type=simple
 User=remla
 Group=remla
-SupplementaryGroups=gpio i2c remlausers
+SupplementaryGroups=gpio i2c remlausers video
 WorkingDirectory=/var/lib/remla
 Environment=REMLA_CONFIG_HOME=/etc
 Environment=REMLA_LABS_DIRECTORY=/var/lib/remla/labs

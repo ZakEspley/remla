@@ -80,6 +80,12 @@ class ReleaseInstaller:
         version = self.latest_version() if version is None else self.validate_version(version)
         release_directory = self.root / "releases" / version
         if release_directory.exists():
+            try:
+                self._verify_camera_runtime(release_directory / "venv")
+            except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                raise ReleaseError(
+                    f"installed ReMLA {version} cannot import Picamera2/libcamera: {error}"
+                ) from error
             self.activate(version)
             return version
 
@@ -87,18 +93,33 @@ class ReleaseInstaller:
             wheel, requirements = self.download_release(version, Path(download_directory))
             try:
                 release_directory.mkdir()
-                subprocess.run([sys.executable, "-m", "venv", release_directory / "venv"], check=True)
+                subprocess.run(
+                    [sys.executable, "-m", "venv", "--system-site-packages", release_directory / "venv"],
+                    check=True,
+                )
                 pip = release_directory / "venv" / "bin" / "pip"
                 subprocess.run(
                     [pip, "install", "--require-hashes", "--no-deps", "-r", requirements],
                     check=True,
                 )
                 subprocess.run([pip, "install", "--no-deps", wheel], check=True)
-            except (OSError, subprocess.CalledProcessError) as error:
+                self._verify_camera_runtime(release_directory / "venv")
+            except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
                 shutil.rmtree(release_directory, ignore_errors=True)
                 raise ReleaseError(f"could not install ReMLA {version}: {error}") from error
         self.activate(version)
         return version
+
+    def _verify_camera_runtime(self, venv: Path) -> None:
+        subprocess.run(
+            [
+                venv / "bin" / "python",
+                "-c",
+                "from picamera2 import Picamera2; from libcamera import Transform",
+            ],
+            check=True,
+            timeout=15,
+        )
 
     def activate(self, version: str) -> None:
         version = self.validate_version(version)

@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 import zipfile
 from pathlib import Path
@@ -101,22 +102,32 @@ class PiInstallerTests(unittest.TestCase):
         self.assertIn("find /var/www/remla -type d -exec chmod 0755 {} +", content)
         self.assertIn("find /var/www/remla -type f -exec chmod 0644 {} +", content)
 
-    def test_installer_grants_the_service_user_serial_device_access(self):
+    def test_installer_grants_the_service_user_serial_and_camera_device_access(self):
         content = INSTALLER.read_text()
 
-        self.assertIn('usermod --append --groups remlausers,gpio,i2c,dialout "$SERVICE_USER"', content)
+        self.assertIn('usermod --append --groups remlausers,gpio,i2c,dialout,video "$SERVICE_USER"', content)
+        self.assertIn("SupplementaryGroups=gpio i2c remlausers video", SERVICE.read_text())
+
+    def test_installer_exposes_os_camera_bindings_in_release_runtime(self):
+        content = INSTALLER.read_text()
+        self.assertIn("python3-picamera2", content)
+        self.assertIn('python3 -m venv --system-site-packages "$release_directory/venv"', content)
+        self.assertIn('"$release_directory/venv/bin/python" -c', content)
+        self.assertNotIn('"$release_directory/venv/bin/remla" camera check', content)
 
 
 class PackageBuildTests(unittest.TestCase):
     def test_built_wheel_contains_runtime_assets(self):
-        wheels = list((ROOT / "dist").glob("remla-*.whl"))
-        self.assertEqual(len(wheels), 1, "build exactly one wheel before running this test")
+        version = tomllib.loads(PYPROJECT.read_text())["project"]["version"]
+        wheels = list((ROOT / "dist").glob(f"remla-{version}-*.whl"))
+        self.assertEqual(len(wheels), 1, "build the current version's wheel before running this test")
 
         with zipfile.ZipFile(wheels[0]) as wheel:
             names = set(wheel.namelist())
 
         self.assertIn("remla/setup/mediamtx.service", names)
         self.assertIn("remla/overlays/remla-camera-mux-4port.dtbo", names)
+        self.assertIn("remla/camera_diagnostics.py", names)
 
 
 if __name__ == "__main__":

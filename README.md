@@ -55,14 +55,18 @@ inside that workspace.
 
 `remla upgrade` downloads a stable GitHub release, verifies its published
 checksums, installs it alongside the current version, atomically switches the
-runtime, and restarts only `remla.service`. `remla rollback` switches back to
-the previous locally installed release. Operating-system updates remain the Pi
-administrator's responsibility.
+runtime, and restarts only `remla.service`. The new runtime must import the
+OS-provided Picamera2/libcamera packages before it is activated; an older
+already-installed release that cannot import them will not be reactivated by
+`remla upgrade`. `remla rollback` switches back to the previous locally
+installed release. Operating-system updates remain the Pi administrator's
+responsibility.
 If lab YAML uses fields unsupported by the previous runtime, restore a compatible
-lab file before starting it. For photo1's isolated cyclic trial, do **not** run
-bare `remla rollback` while the wheel `cyclic` fields are installed; the exact
-original YAML backup and runtime links are recorded in `roadmap.md`. A restart
-may reset/move devices, so coordinate a clear maintenance window.
+lab file before starting it. On photo1, the immediate `/opt/remla/previous`
+runtime understands the installed `cyclic` fields; older UI-state/0.4.5 runtimes
+do not. Restore the exact original YAML backup recorded in `roadmap.md` before
+starting those older runtimes. A restart may reset/move devices, so coordinate
+a clear maintenance window.
 
 ## Select and deploy a lab website
 
@@ -95,6 +99,32 @@ selected lab YAML: update that YAML's `numCameras`, `cameraNamesDict`, and
 `initialCamera` fields to match the physical configuration before starting
 ReMLA after reboot.
 
+`remla camera check` checks whether this ReMLA Python runtime can import
+Picamera2/libcamera; it does **not** open a sensor or prove device permissions.
+New releases installed with the current installer include the OS camera packages
+and expose them to the release venv; previously installed runtimes do not change.
+
+`remla camera modes` **opens** the currently routed camera to list native sensor
+sizes, formats, and bit depths. It prints a warning, then refuses if either
+`mediamtx.service` or `remla.service` is not fully stopped (inactive/dead).
+Confirm *all* other camera users are stopped too. If both services were running
+before an approved maintenance window, use:
+
+```bash
+remla stop                         # May reset/move devices; does not stop MediaMTX
+sudo remla mediamtx stop            # Root-only; interrupts the live camera stream
+remla camera modes                 # Optional: --camera-index N
+sudo systemctl start mediamtx.service
+remla start
+```
+
+`remla mediamtx stop` does not stop ReMLA or automatically restart MediaMTX.
+Restore each service to its **prior** state even if discovery fails; do not
+start ReMLA if it was already intentionally stopped. Mode
+discovery does not stop services or switch mux slots. Never use it on photo1
+while MediaMTX owns the stream. Sensor bit depth does not imply a high-bit-depth
+JPEG/PNG still; still capture remains unimplemented.
+
 ## Local Pi validation
 
 Build a development wheel with UV, then run the same installer against that
@@ -117,7 +147,7 @@ PEP 517 wheels:
 
 ```bash
 uv sync
-uv run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety tests.test_installation tests.test_release tests.test_workspace tests.test_setup_commands tests.test_web_deployment
+uv run python -m unittest tests.test_runtime_imports tests.test_experiment_lifecycle tests.test_boot_status tests.test_camera_cycle tests.test_camera_modes tests.test_runtime_state tests.test_runtime_operations tests.test_command_scheduler tests.test_mediamtx tests.test_mediamtx_camera tests.test_device_config tests.test_controller_safety tests.test_installation tests.test_release tests.test_workspace tests.test_setup_commands tests.test_web_deployment
 uv build
 ```
 

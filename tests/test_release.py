@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import hashlib
+import subprocess
 from unittest import mock
 from pathlib import Path
 
@@ -56,7 +57,7 @@ class ReleaseInstallerTests(unittest.TestCase):
             requirements.write_text("")
             installer = ReleaseInstaller(root)
 
-            def create_venv(command, check):
+            def create_venv(command, **kwargs):
                 if command[1:3] == ["-m", "venv"]:
                     (Path(command[-1]) / "bin").mkdir(parents=True)
 
@@ -68,6 +69,64 @@ class ReleaseInstallerTests(unittest.TestCase):
 
             venv_command = run.call_args_list[0].args[0]
             self.assertEqual(venv_command[-1], root / "releases" / "0.4.1" / "venv")
+            self.assertIn("--system-site-packages", venv_command)
+            self.assertTrue(
+                any(
+                    call.args[0][0] == root / "releases" / "0.4.1" / "venv" / "bin" / "python"
+                    and "from picamera2 import Picamera2" in call.args[0][-1]
+                    for call in run.call_args_list
+                )
+            )
+
+    def test_install_does_not_activate_runtime_without_picamera2(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "install"
+            current = root / "releases" / "0.4.0" / "venv"
+            current.mkdir(parents=True)
+            installer = ReleaseInstaller(root)
+            installer.activate("0.4.0")
+            wheel = Path(directory) / "remla-0.4.1-py3-none-any.whl"
+            requirements = Path(directory) / "requirements.txt"
+            wheel.write_bytes(b"wheel")
+            requirements.write_text("")
+
+            def run_command(command, **kwargs):
+                if command[1:3] == ["-m", "venv"]:
+                    (Path(command[-1]) / "bin").mkdir(parents=True)
+                elif command[1:2] == ["-c"]:
+                    raise subprocess.CalledProcessError(1, command)
+
+            with (
+                mock.patch.object(installer, "download_release", return_value=(wheel, requirements)),
+                mock.patch("remla.release.subprocess.run", side_effect=run_command),
+                self.assertRaises(ReleaseError),
+            ):
+                installer.install("0.4.1")
+
+            self.assertEqual((root / "current").resolve(), current)
+            self.assertFalse((root / "releases" / "0.4.1").exists())
+
+    def test_existing_release_without_picamera2_is_not_activated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current = root / "releases" / "0.4.0" / "venv"
+            stale = root / "releases" / "0.4.1" / "venv"
+            current.mkdir(parents=True)
+            stale.mkdir(parents=True)
+            installer = ReleaseInstaller(root)
+            installer.activate("0.4.0")
+
+            with (
+                mock.patch(
+                    "remla.release.subprocess.run",
+                    side_effect=subprocess.CalledProcessError(1, [stale / "bin" / "python"]),
+                ),
+                self.assertRaisesRegex(ReleaseError, "cannot import Picamera2/libcamera"),
+            ):
+                installer.install("0.4.1")
+
+            self.assertEqual((root / "current").resolve(), current)
+            self.assertTrue(stale.exists())
 
     def test_upgrade_rolls_back_when_service_restart_fails(self):
         from remla import main

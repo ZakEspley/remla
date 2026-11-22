@@ -134,7 +134,8 @@ id "$OPERATOR" >/dev/null 2>&1 || fail "operator account does not exist: $OPERAT
 
 apt-get update
 apt-get install --yes --no-install-recommends \
-    ca-certificates curl i2c-tools nginx pigpio python3-pigpio python3-pip python3-venv
+    ca-certificates curl i2c-tools nginx pigpio python3-pigpio python3-pip python3-venv \
+    python3-libcamera python3-picamera2
 
 if ! getent passwd "$SERVICE_USER" >/dev/null; then
     useradd --system --home /var/lib/remla --create-home --shell /usr/sbin/nologin "$SERVICE_USER"
@@ -143,7 +144,7 @@ getent group remlausers >/dev/null || groupadd --system remlausers
 getent group gpio >/dev/null || groupadd --system gpio
 getent group i2c >/dev/null || groupadd --system i2c
 getent group dialout >/dev/null || groupadd --system dialout
-usermod --append --groups remlausers,gpio,i2c,dialout "$SERVICE_USER"
+usermod --append --groups remlausers,gpio,i2c,dialout,video "$SERVICE_USER"
 usermod --append --groups remlausers "$OPERATOR"
 
 install -d -o "$SERVICE_USER" -g remlausers -m 2775 "$INSTALL_ROOT"
@@ -152,7 +153,7 @@ release_directory="$INSTALL_ROOT/releases/$VERSION"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$release_directory"
 wheel_asset="$release_directory/$(basename "$WHEEL")"
 install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0644 "$WHEEL" "$wheel_asset"
-runuser -u "$SERVICE_USER" -- python3 -m venv "$release_directory/venv"
+runuser -u "$SERVICE_USER" -- python3 -m venv --system-site-packages "$release_directory/venv"
 if [[ -n "$REQUIREMENTS" ]]; then
     requirements_asset="$release_directory/requirements.txt"
     install -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0644 "$REQUIREMENTS" "$requirements_asset"
@@ -161,6 +162,9 @@ if [[ -n "$REQUIREMENTS" ]]; then
 else
     runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/pip" install --force-reinstall "$wheel_asset"
 fi
+runuser -u "$SERVICE_USER" -- "$release_directory/venv/bin/python" -c \
+    'from picamera2 import Picamera2; from libcamera import Transform' || \
+    fail "Picamera2/libcamera is not importable in the new ReMLA runtime"
 
 install -d -o "$SERVICE_USER" -g remlausers -m 2770 /var/lib/remla/labs
 install -d -o "$SERVICE_USER" -g remlausers -m 2770 /etc/remla

@@ -6,6 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from typer.testing import CliRunner
+
+from remla import main
+
 from remla.mediamtx import (
     MediaMTXInstallError,
     _verify_checksum,
@@ -84,6 +88,59 @@ class MediaMTXInstallerTests(unittest.TestCase):
             checksums.write_text(f"{'0' * 64}  {archive.name}\n")
             with self.assertRaises(MediaMTXInstallError):
                 _verify_checksum(archive, checksums, archive.name)
+
+
+class MediaMTXCommandTests(unittest.TestCase):
+    def setUp(self):
+        self.runner = CliRunner()
+
+    def test_stop_requires_root_without_touching_services(self):
+        with (
+            patch.object(main.os, "geteuid", return_value=1000),
+            patch.object(main.subprocess, "run") as run,
+        ):
+            result = self.runner.invoke(main.app, ["mediamtx", "stop"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("sudo remla mediamtx stop", result.output)
+        run.assert_not_called()
+
+    def test_stop_only_stops_mediamtx(self):
+        with (
+            patch.object(main.os, "geteuid", return_value=0),
+            patch.object(main.subprocess, "run") as run,
+        ):
+            result = self.runner.invoke(main.app, ["mediamtx", "stop"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("interrupt", result.output.lower())
+        run.assert_called_once_with(["systemctl", "stop", "mediamtx.service"], check=True)
+
+    def test_stop_reports_systemctl_failure(self):
+        import subprocess
+
+        with (
+            patch.object(main.os, "geteuid", return_value=0),
+            patch.object(
+                main.subprocess,
+                "run",
+                side_effect=subprocess.CalledProcessError(1, ["systemctl", "stop", "mediamtx.service"]),
+            ),
+        ):
+            result = self.runner.invoke(main.app, ["mediamtx", "stop"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("Could not stop MediaMTX", result.output)
+
+    def test_stop_reports_missing_systemctl(self):
+        with (
+            patch.object(main.os, "geteuid", return_value=0),
+            patch.object(main.subprocess, "run", side_effect=OSError("systemctl unavailable")),
+        ):
+            result = self.runner.invoke(main.app, ["mediamtx", "stop"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("systemctl unavailable", result.output)
 
 
 if __name__ == "__main__":
