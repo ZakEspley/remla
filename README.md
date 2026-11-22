@@ -58,6 +58,11 @@ checksums, installs it alongside the current version, atomically switches the
 runtime, and restarts only `remla.service`. `remla rollback` switches back to
 the previous locally installed release. Operating-system updates remain the Pi
 administrator's responsibility.
+If lab YAML uses fields unsupported by the previous runtime, restore a compatible
+lab file before starting it. For photo1's isolated cyclic trial, do **not** run
+bare `remla rollback` while the wheel `cyclic` fields are installed; the exact
+original YAML backup and runtime links are recorded in `roadmap.md`. A restart
+may reset/move devices, so coordinate a clear maintenance window.
 
 ## Select and deploy a lab website
 

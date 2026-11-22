@@ -34,7 +34,7 @@ from remla.systemHelpers import *
 from remla.typerHelpers import *
 from remla.workspace import WorkspaceLinkError, create_workspace_link
 from remla.web_deployment import set_website_permissions
-from remla.yaml import createDevicesFromYml, yaml
+from remla.yaml import createDevicesFromYml, validate_cyclic_devices, yaml
 
 from .customvalidators import *
 
@@ -1042,6 +1042,7 @@ def run(
             request_foreground_shutdown,
         )
         try:
+            validate_cyclic_devices(labSettings["devices"])
             initialize_hardware_resources()
             devices = createDevicesFromYml(labSettings["devices"])
             print("Using device types:", device_type_summary(labSettings["devices"]))

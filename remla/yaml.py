@@ -7,6 +7,7 @@ import typer
 from ruamel.yaml import YAML
 from ruamel.yaml.nodes import ScalarNode
 
+from remla.cyclic_motion import parse_cyclic_period
 from remla.device_config import validate_device_arguments
 from remla.labcontrol import Controllers
 from remla.settings import secretsDirectory
@@ -39,6 +40,43 @@ def resolve_environment_reference(value, device_name, option_name):
     if not resolved:
         raise ValueError(f"Secret '{secret_name}' is empty")
     return resolved
+
+
+def validate_cyclic_devices(device_data):
+    """Validate every cyclic opt-in before any motor hardware is constructed."""
+    periods = {}
+    for name, details in device_data.items():
+        if 'cyclic' not in details:
+            continue
+        cls = getattr(Controllers, details['type'])
+        args = {key: value for key, value in details.items()
+                if key not in ('type', 'name', 'power', 'cyclic')}
+        validate_device_arguments(name, cls, args)
+        period = parse_cyclic_period(details['cyclic'])
+        if issubclass(cls, (Controllers.DCMotorI2C, Controllers.PololuDCMotor)):
+            raise ValueError(f"Device '{name}' has no measured position for cyclic goto")
+        if not issubclass(cls, (
+            Controllers.StepperSimple, Controllers.StepperI2C,
+            Controllers.PololuStepperMotor, Controllers.S42CStepperMotor,
+        )):
+            raise ValueError(f"Device '{name}' does not support cyclic goto")
+        refs = args.get('refPoints', {})
+        if not isinstance(refs, dict) or not refs or any(type(value) is not int for value in refs.values()):
+            raise ValueError(f"Device '{name}' needs integer step refPoints for cyclic goto")
+        if args.get('limitSwitches') or args.get('homeSwitch') is not None:
+            raise ValueError(f"Device '{name}' cyclic goto cannot use limit or home switches")
+        if 'bounds' in args:
+            bounds = args['bounds']
+            if (not isinstance(bounds, (tuple, list)) or len(bounds) != 2
+                    or any(type(value) is not int for value in bounds) or bounds[0] > bounds[1]):
+                raise ValueError(f"Device '{name}' needs integer travel bounds for cyclic goto")
+        initial_position = args.get('initialPosition', 0)
+        if type(initial_position) is not int:
+            raise ValueError(f"Device '{name}' needs an integer initialPosition for cyclic goto")
+        if 'bounds' in args and not bounds[0] <= initial_position <= bounds[1]:
+            raise ValueError(f"Device '{name}' initialPosition is outside cyclic travel bounds")
+        periods[name] = period
+    return periods
 # yaml.allow_unicode = True
 
 # Used to convert pathLib paths too yml files and vice versa.
@@ -70,6 +108,8 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
     :rtype: List[Any]
     :raises ValueError: If there is a circular dependency detected among devices.
     """
+
+    cyclic_periods = validate_cyclic_devices(deviceData)
 
     # Dictionary to hold name -> object mapping
     devices = {}
@@ -112,7 +152,7 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
         initArgs = {
             key: resolve_environment_reference(value, deviceName, key)
             for key, value in deviceDetails.items()
-            if key not in ['type', 'name', 'power']
+            if key not in ['type', 'name', 'power', 'cyclic']
         }
         validate_device_arguments(deviceName, cls, initArgs)
 
@@ -142,6 +182,8 @@ def createDevicesFromYml(deviceData:dict) -> dict[Any]:
 
         # Create the device instance and add to the devices dictionary
         device = cls(name=deviceName, **initArgs)
+        if deviceName in cyclic_periods:
+            device.cyclic_period = cyclic_periods[deviceName]
         if power_config is not None:
             device.configure_power_route(provider, target)
         devices[deviceName] = device

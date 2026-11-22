@@ -36,6 +36,7 @@ from remla.labcontrol.hardware import (
     visaManager,
 )
 from remla.dli_rest import DliRestClient
+from remla.cyclic_motion import shortest_cyclic_delta
 from remla.mediamtx_camera import patch_camera_control
 from remla.systemHelpers import resolve_i2c_bus
 
@@ -123,7 +124,14 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
                 f"{self.__class__.__name__}.{cmd} exists but is not callable"
             )
 
-        return method(params)
+        try:
+            return method(params)
+        except BaseException:
+            if getattr(self, "cyclic_period", None) is not None and cmd in {
+                "move", "degMove", "adminMove",
+            }:
+                self.cyclic_position_valid = False
+            raise
 
     def configure_power_route(self, provider, target):
         if not callable(getattr(provider, "get_power_state", None)) or not callable(
@@ -131,6 +139,28 @@ class BaseController(ABC, metaclass=CombinedMetaClass):
         ):
             raise TypeError(f"Power provider for '{self.name}' does not support power routing")
         self.power_route = (provider, target)
+
+    def planned_goto_steps(self, target, position, lower=None, upper=None):
+        period = getattr(self, "cyclic_period", None)
+        if period is None:
+            return target - position
+        if getattr(self, "cyclic_position_valid", True) is False:
+            raise ValueError("Cyclic position is unknown after an interrupted move or stop")
+        return shortest_cyclic_delta(position, target, period, lower, upper)
+
+    def move_goto_steps(self, steps, position):
+        if steps == 0 and getattr(self, "cyclic_period", None) is not None:
+            return ("MESSAGE", f"{self.name}/position/{position}")
+        try:
+            return self.move(steps)
+        except BaseException:
+            if getattr(self, "cyclic_period", None) is not None:
+                self.cyclic_position_valid = False
+            raise
+
+    def invalidate_cyclic_position(self):
+        if getattr(self, "cyclic_period", None) is not None:
+            self.cyclic_position_valid = False
 
     def _power_route(self):
         if self.power_route is None:
@@ -427,7 +457,10 @@ class StepperSimple(stp.Motor, BaseController):
     def goto(self, position):
         print(position)
         endPoint = self.refPoints[position]
-        self.move(endPoint - self.currentPosition)
+        steps = self.planned_goto_steps(endPoint, self.currentPosition)
+        response = self.move_goto_steps(steps, self.currentPosition)
+        if getattr(self, "cyclic_period", None) is not None:
+            return response
 
     def goto_parser(self, params):
         if len(params) != 1:
@@ -438,9 +471,13 @@ class StepperSimple(stp.Motor, BaseController):
     #     super().cleanup()
 
     def reset(self):
+        if getattr(self, "cyclic_period", None) is not None:
+            steps = self.planned_goto_steps(0, self.currentPosition)
+            return self.move_goto_steps(steps, self.currentPosition)
         super().reset()
 
     def safe_stop(self):
+        self.invalidate_cyclic_position()
         self.release()
 
 
@@ -618,13 +655,22 @@ class StepperI2C(MotorKit, BaseController):
     def goto(self, position):
         print(position)
         endPoint = self.refPoints[position]
-        response = self.move(endPoint - self.currentPosition)
+        steps = self.planned_goto_steps(
+            endPoint, self.currentPosition, self.lowerBound, self.upperBound
+        )
+        response = self.move_goto_steps(steps, self.currentPosition)
+        if getattr(self, "cyclic_period", None) is not None:
+            return response
         return ("MESSAGE", response)
 
     def admingoto(self, position):
         print(position)
         endPoint = self.refPoints[position]
-        response = self.adminMove(endPoint - self.currentPosition)
+        try:
+            response = self.adminMove(endPoint - self.currentPosition)
+        except BaseException:
+            self.invalidate_cyclic_position()
+            raise
         return ("MESSAGE", response)
 
     def goto_parser(self, params):
@@ -664,12 +710,18 @@ class StepperI2C(MotorKit, BaseController):
         self.move(direction * additionalSteps)
 
     def reset(self):
+        if getattr(self, "cyclic_period", None) is not None:
+            steps = self.planned_goto_steps(
+                self.initialPosition, self.currentPosition, self.lowerBound, self.upperBound
+            )
+            return self.move_goto_steps(steps, self.currentPosition)
         if self.homeSwitch is not None:
             self.home(1)
         else:
             self.move(self.initialPosition - self.currentPosition)
 
     def safe_stop(self):
+        self.invalidate_cyclic_position()
         self.device.release()
 
     def home(self, params):
@@ -722,6 +774,8 @@ class FilterStepperI2C(StepperI2C):
         self.refPointsRaw = sorted(list(refPoints.values()))
 
     def goto(self, position):
+        if getattr(self, "cyclic_period", None) is not None:
+            return super().goto(position)
         if self.currentPosition in self.refPointsRaw:
             curIdx = self.refPointsRaw.index(self.currentPosition)
             tgtIdx = self.refPointsRaw.index(self.refPoints[position])
@@ -1445,7 +1499,12 @@ class PololuStepperMotor(BaseController):
     def goto(self, position):
         print(position)
         endPoint = self.refPoints[position]
-        self.move(endPoint - self.currentPosition)
+        steps = self.planned_goto_steps(
+            endPoint, self.currentPosition, self.lowerBound, self.upperBound
+        )
+        response = self.move_goto_steps(steps, self.currentPosition)
+        if getattr(self, "cyclic_period", None) is not None:
+            return response
 
     def goto_parser(self, params):
         if len(params) != 1:
@@ -1479,6 +1538,9 @@ class PololuStepperMotor(BaseController):
         self.move(direction * additionalSteps)
 
     def reset(self):
+        if getattr(self, "cyclic_period", None) is not None:
+            steps = self.planned_goto_steps(0, self.currentPosition, self.lowerBound, self.upperBound)
+            return self.move_goto_steps(steps, self.currentPosition)
         if self.homeSwitch is not None:
             self.home(1)
         else:
@@ -1486,6 +1548,7 @@ class PololuStepperMotor(BaseController):
         # pass
 
     def safe_stop(self):
+        self.invalidate_cyclic_position()
         pi.wave_tx_stop()
         pi.write(self.enablePin, 0)
 
@@ -3085,17 +3148,28 @@ class S42CStepperMotor(BaseController):
         Attemps to move to the target refPoint. Will stop if any bounds are hit. See
         class documentation `Bound crossing handling` for details.
         """
-        if safe and (self.refPoints[ref] > self.UB or self.refPoints[ref] < self.LB):
+        target = self.refPoints[ref]
+        if getattr(self, "cyclic_period", None) is not None:
+            if self.curPos != self.state["position"]:
+                raise ValueError("Cyclic position is not synchronized with physical travel")
+            steps = self.planned_goto_steps(target, self.curPos, self.LB, self.UB)
+            return self.move_goto_steps(steps, self.state["position"])
+        if safe and (target > self.UB or target < self.LB):
             warn(self.name + " refPoint out of bounds, move canceled.", RuntimeWarning)
             return "{0}/{1}/{2}".format(self.name, "position", self.state["position"])
         else:
-            target = self.refPoints[ref]
             return self.move(target - self.curPos)
 
     def reset(self):
+        if getattr(self, "cyclic_period", None) is not None:
+            if self.curPos != self.state["position"]:
+                raise ValueError("Cyclic position is not synchronized with physical travel")
+            steps = self.planned_goto_steps(0, self.curPos, self.LB, self.UB)
+            return self.move_goto_steps(steps, self.curPos)
         return self.move(-self.curPos)
 
     def safe_stop(self):
+        self.invalidate_cyclic_position()
         self.pi.wave_tx_stop()
         self.pi.write(self.EN, 1)
 
