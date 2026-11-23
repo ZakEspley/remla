@@ -69,6 +69,24 @@ For positional controller parsers, clients use `{"arguments": ["value"]}`.
 The special `Experiment` / `handoff` command accepts
 `{"choice": "continue"}` or `{"choice": "reset"}`.
 
+### Still snapshots (photo1 test runtime; not a stable release)
+
+When the selected lab YAML explicitly opts into `stillCapture`, a ready JSON
+control owner can send `{"deviceName":"Experiment","commandName":"capture_still","parameters":{}}`.
+The request interrupts the native `cam` stream temporarily; it does not open
+the sensor concurrently with MediaMTX. A successful correlated result contains
+`payload.data` with `width`, `height`, `mimeType: "image/png"`,
+`downloadPath: "ws/snapshot"`, and an opaque `token`. Resolve this fixed path
+against the **page directory** (e.g. `/photo1/ws/snapshot` behind a public
+proxy, `/ws/snapshot` on the Pi) and send a same-origin HTTP GET with
+`Authorization: Bearer <token>`; never put
+the token in a URL, shared state, or logs. It expires after 30 seconds, can be
+used once, and is invalid if the owner disconnects or loses control. A request
+without opt-in returns `snapshot_disabled` (403); other outcomes include
+`not_owner` (403), `invalid_parameters` (400), `snapshot_limit` (429), and
+`snapshot_unavailable` (503). Only a processed 8-bit RGB PNG is supported;
+see `docs/snapshots.md` for rollout and recovery prerequisites.
+
 ### Shared presentation state
 
 Any JSON frontend may publish **public UI presentation choices** with the

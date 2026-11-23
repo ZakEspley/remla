@@ -142,6 +142,32 @@ class MediaMTXCommandTests(unittest.TestCase):
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("systemctl unavailable", result.output)
 
+    def test_snapshot_install_routes_operator_stop_through_broker(self):
+        with (
+            patch.object(main.os, "geteuid", return_value=0),
+            patch.object(main, "snapshotBrokerStatePath") as state,
+            patch.object(main, "snapshotBrokerPath") as helper,
+            patch.object(main.subprocess, "run") as run,
+        ):
+            state.exists.return_value = True
+            helper.is_file.return_value = True
+            result = self.runner.invoke(main.app, ["mediamtx", "stop"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        run.assert_called_once_with([str(helper), "--stop-stream"], check=True, timeout=90)
+
+    def test_missing_snapshot_broker_fails_closed_when_state_exists(self):
+        with (
+            patch.object(main.os, "geteuid", return_value=0),
+            patch.object(main, "snapshotBrokerStatePath") as state,
+            patch.object(main, "snapshotBrokerPath") as helper,
+            patch.object(main.subprocess, "run") as run,
+        ):
+            state.exists.return_value = True
+            helper.is_file.return_value = False
+            result = self.runner.invoke(main.app, ["mediamtx", "stop"])
+        self.assertNotEqual(result.exit_code, 0)
+        run.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

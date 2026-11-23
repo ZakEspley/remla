@@ -24,6 +24,7 @@ from typing_extensions import Annotated
 
 from remla import i2ccmd, setupcmd
 from remla.camera_diagnostics import check_picamera2_runtime, list_camera_modes, require_idle_services
+from remla.snapshot_config import parse_still_capture
 from remla.labcontrol.Controllers import *
 from remla.labcontrol.Experiment import Experiment
 from remla.mediamtx import MediaMTXInstallError, install_latest
@@ -613,8 +614,13 @@ def mediamtx_stop():
 
     warning("Stopping MediaMTX interrupts the live camera stream; ReMLA is not stopped.")
     try:
-        subprocess.run(["systemctl", "stop", "mediamtx.service"], check=True)
-    except (OSError, subprocess.CalledProcessError) as error:
+        if snapshotBrokerStatePath.exists():
+            if not snapshotBrokerPath.is_file():
+                raise OSError("Snapshot broker is missing; MediaMTX stop was not attempted")
+            subprocess.run([str(snapshotBrokerPath), "--stop-stream"], check=True, timeout=90)
+        else:
+            subprocess.run(["systemctl", "stop", "mediamtx.service"], check=True)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         alert(f"Could not stop MediaMTX: {error}")
         raise typer.Abort() from error
     success("Stopped MediaMTX")
@@ -1059,6 +1065,12 @@ def run(
             )
             raise typer.Abort()
 
+        try:
+            snapshot_config = parse_still_capture(labSettings.get("stillCapture", False))
+        except ValueError as error:
+            alert(str(error))
+            raise typer.Abort() from error
+
         lab_config_identity = LabConfigIdentity.from_content(
             str(remlaSettings["currentLab"]), lab_config_content
         )
@@ -1074,6 +1086,8 @@ def run(
                 "RemoteLabs",
                 lab_config_identity=lab_config_identity,
             )
+
+        experiment.snapshot_config = snapshot_config
 
         experiment.initialize_runtime()
 

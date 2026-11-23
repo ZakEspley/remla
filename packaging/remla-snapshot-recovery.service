@@ -1,0 +1,14 @@
+[Unit]
+Description=Recover interrupted ReMLA snapshot stream transaction
+After=local-fs.target mediamtx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/remla-snapshot-helper --recover
+TimeoutStartSec=180s
+UMask=0077
+StandardInput=null
+StandardOutput=null
+
+[Install]
+WantedBy=multi-user.target

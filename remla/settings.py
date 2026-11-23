@@ -76,5 +76,8 @@ websiteImgsDirectory = websiteStaticDirectory / "imgs"
 
 runMarker = settingsDirectory / "remla_camera_cycled" 
 runtimeStatePath = settingsDirectory / "runtime-state.json"
+snapshotBudgetPath = settingsDirectory / "snapshot-budget.json"
+snapshotBrokerStatePath = Path("/var/lib/remla-snapshot")
+snapshotBrokerPath = Path("/usr/local/libexec/remla-snapshot-helper")
 ipcSocketPath = Path(os.environ.get("REMLA_IPC_SOCKET", "/tmp/remla_cmd.sock"))
 ipcSocketGroup = os.environ.get("REMLA_OPERATOR_GROUP")

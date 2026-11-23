@@ -1,0 +1,4 @@
+# Empty argument string is mandatory: remla may never select recovery actions.
+remla ALL=(root) NOPASSWD: /usr/local/libexec/remla-snapshot-helper ""
+Defaults!/usr/local/libexec/remla-snapshot-helper env_reset
+Defaults!/usr/local/libexec/remla-snapshot-helper !setenv

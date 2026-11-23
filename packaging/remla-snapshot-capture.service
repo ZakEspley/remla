@@ -1,0 +1,32 @@
+[Unit]
+Description=Bounded unprivileged ReMLA still capture
+After=local-fs.target
+
+[Service]
+Type=exec
+User=remla
+Group=remla
+SupplementaryGroups=video
+EnvironmentFile=/var/lib/remla-snapshot/request.env
+WorkingDirectory=/run/remla-snapshot/output
+ExecStart=/opt/remla/current/bin/python -I -m remla.snapshot_worker ${WIDTH} ${HEIGHT} /run/remla-snapshot/output/capture.png
+RuntimeMaxSec=40s
+TimeoutStartSec=5s
+TimeoutStopSec=5s
+KillMode=control-group
+SendSIGKILL=yes
+Restart=no
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/remla-snapshot/output
+RestrictSUIDSGID=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+StandardInput=null
+StandardOutput=null
+StandardError=null

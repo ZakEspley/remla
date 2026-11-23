@@ -1,0 +1,413 @@
+#!/usr/bin/python3 -I
+"""Installed root-owned broker. Never import or execute application code as root."""
+
+import contextlib
+import fcntl
+import io
+import json
+import os
+from pathlib import Path
+import pwd
+import select
+import stat
+import struct
+import subprocess
+import sys
+import time
+import zlib
+from urllib.request import urlopen
+
+
+STREAM = "mediamtx.service"
+CAPTURE = "remla-snapshot-capture.service"
+TIMER = "remla-snapshot-recovery.timer"
+STATE = Path("/var/lib/remla-snapshot")
+WORK = Path("/run/remla-snapshot/output")
+HELPER = Path("/usr/local/libexec/remla-snapshot-helper")
+MAX_PNG = 25_000_000
+PROPERTIES = "LoadState,ActiveState,SubState,Result,ExecMainStatus,ControlGroup,UnitFileState"
+
+
+class BrokerError(Exception):
+    pass
+
+
+def systemctl(verb, unit):
+    if verb not in ("show", "start", "stop") or unit not in (STREAM, CAPTURE, TIMER):
+        raise BrokerError("Invalid service operation")
+    args = ["/usr/bin/systemctl", verb, unit]
+    if verb == "show":
+        args.extend(["--no-pager", "--property=" + PROPERTIES])
+    try:
+        result = subprocess.run(
+            args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=50, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "SYSTEMD_COLORS": "0"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise BrokerError("Service operation unavailable or timed out") from error
+    if result.returncode:
+        raise BrokerError("Service operation failed")
+    if verb != "show":
+        return {}
+    try:
+        return dict(line.split("=", 1) for line in result.stdout.decode("ascii").splitlines())
+    except (ValueError, UnicodeError) as error:
+        raise BrokerError("Invalid service state") from error
+
+
+def read_file(path, uid, limit, private=False):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except FileNotFoundError:
+        raise
+    except OSError as error:
+        raise BrokerError("Required regular file unavailable") from error
+    with os.fdopen(fd, "rb") as source:
+        metadata = os.fstat(source.fileno())
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != uid
+                or metadata.st_nlink != 1 or metadata.st_size > limit
+                or metadata.st_mode & (0o077 if private else 0o022)):
+            raise BrokerError("Unsafe file metadata")
+        result = source.read(limit + 1)
+        if len(result) > limit:
+            raise BrokerError("File too large")
+        after = os.fstat(source.fileno())
+        if (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (
+                metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns):
+            raise BrokerError("File changed during read")
+        return result
+
+
+def directory(path, uid, mode_mask=0o022):
+    metadata = path.lstat()
+    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != uid or metadata.st_mode & mode_mask:
+        raise BrokerError("Unsafe directory")
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise BrokerError("Duplicate JSON field")
+        result[key] = value
+    return result
+
+
+def request_data(source):
+    try:
+        fd = source.fileno()
+    except (AttributeError, io.UnsupportedOperation):
+        raw = source.read(257)
+    else:
+        raw = b""
+        deadline = time.monotonic() + 3
+        while len(raw) <= 256:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([fd], [], [], remaining)[0]:
+                raise BrokerError("Request timed out")
+            part = os.read(fd, 257 - len(raw))
+            raw += part
+            if not part:
+                break
+    try:
+        value = json.loads(raw, object_pairs_hook=unique_object)
+    except (ValueError, UnicodeError) as error:
+        raise BrokerError("Invalid request") from error
+    if (len(raw) > 256 or type(value) is not dict or set(value) != {"width", "height"}
+            or any(type(value[key]) is not int or not 1 <= value[key] <= 8192 for key in value)
+            or value["width"] * value["height"] > 8_000_000):
+        raise BrokerError("Invalid dimensions")
+    return value["width"], value["height"]
+
+
+def validate_png(data, width, height):
+    if not 57 <= len(data) <= MAX_PNG or data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise BrokerError("Invalid PNG")
+    offset = 8
+    parts = []
+    first = True
+    finished = False
+    while offset + 12 <= len(data):
+        size = struct.unpack_from(">I", data, offset)[0]
+        kind = data[offset + 4:offset + 8]
+        end = offset + 12 + size
+        if end > len(data):
+            raise BrokerError("Truncated PNG")
+        payload = data[offset + 8:offset + 8 + size]
+        crc = struct.unpack_from(">I", data, offset + 8 + size)[0]
+        if zlib.crc32(kind + payload) != crc:
+            raise BrokerError("Invalid PNG checksum")
+        if first:
+            if kind != b"IHDR" or payload != struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0):
+                raise BrokerError("Wrong PNG format or dimensions")
+            first = False
+        elif kind == b"IDAT":
+            parts.append(payload)
+        elif kind == b"IEND" and size == 0 and parts and end == len(data):
+            finished = True
+            break
+        else:
+            raise BrokerError("Unexpected PNG chunk")
+        offset = end
+    if not finished:
+        raise BrokerError("Incomplete PNG")
+    expected = (width * 3 + 1) * height
+    inflater = zlib.decompressobj()
+    try:
+        pixels = inflater.decompress(b"".join(parts), expected + 1)
+    except zlib.error as error:
+        raise BrokerError("Invalid PNG pixels") from error
+    if (len(pixels) != expected or not inflater.eof or inflater.unused_data or inflater.unconsumed_tail
+            or any(pixels[row * (width * 3 + 1)] > 4 for row in range(height))):
+        raise BrokerError("Invalid PNG pixel length or filter")
+
+
+def wait_for_cam_ready():
+    deadline = time.monotonic() + 25
+    previous_legacy = None
+    while time.monotonic() < deadline:
+        try:
+            with urlopen("http://127.0.0.1:9997/v3/paths/get/cam", timeout=1) as response:
+                if response.status == 200:
+                    state = json.load(response)
+                    if (type(state) is dict and type(state.get("source")) is dict
+                            and state["source"].get("type") == "rpiCameraSource"):
+                        if type(state.get("online")) is bool:
+                            if state["online"]:
+                                return True
+                        elif (state.get("ready") is True and state.get("readyTime")
+                              and isinstance(state.get("tracks"), list)
+                              and "H264" in state["tracks"]
+                              and type(state.get("bytesReceived")) is int):
+                            sample = (state["readyTime"], state["bytesReceived"])
+                            if (previous_legacy is not None and sample[0] == previous_legacy[0]
+                                    and sample[1] > previous_legacy[1]):
+                                return True
+                            previous_legacy = sample
+                            time.sleep(0.25)
+                            continue
+        except (OSError, ValueError, KeyError):
+            pass
+        previous_legacy = None
+        time.sleep(0.25)
+    return False
+
+
+class Broker:
+    def __init__(self, state, work, uid, gid, root_uid=0, command=systemctl, ready=wait_for_cam_ready):
+        self.state = state
+        self.work = work
+        self.uid = uid
+        self.gid = gid
+        self.root_uid = root_uid
+        self.command = command
+        self.ready = ready
+
+    def sync_directory(self):
+        fd = os.open(self.state, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def atomic_write(self, name, data):
+        path = self.state / name
+        temporary = self.state / (name + ".new")
+        # A prior SIGKILL may leave this fixed root-private temporary behind.
+        temporary.unlink(missing_ok=True)
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as destination:
+            destination.write(data)
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.replace(temporary, path)
+        self.sync_directory()
+
+    def write_marker(self, restore, stop=False):
+        self.atomic_write("transaction.json", json.dumps({"version": 1, "restore": restore, "stop": stop}).encode("ascii"))
+
+    def marker(self):
+        try:
+            value = json.loads(read_file(self.state / "transaction.json", self.root_uid, 128, private=True),
+                               object_pairs_hook=unique_object)
+        except FileNotFoundError:
+            return None
+        except (ValueError, UnicodeError) as error:
+            raise BrokerError("Invalid recovery marker") from error
+        if (type(value) is not dict or set(value) != {"version", "restore", "stop"}
+                or type(value["version"]) is not int or value["version"] != 1
+                or type(value["restore"]) is not bool or type(value["stop"]) is not bool
+                or value["restore"] and value["stop"]):
+            raise BrokerError("Invalid recovery marker")
+        return value
+
+    @contextlib.contextmanager
+    def locked(self):
+        directory(self.state, self.root_uid, 0o077)
+        fd = os.open(self.state / "lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        try:
+            metadata = os.fstat(fd)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != self.root_uid or metadata.st_nlink != 1:
+                raise BrokerError("Unsafe lock")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise BrokerError("Snapshot transaction busy; retry later") from error
+            yield
+        finally:
+            os.close(fd)
+
+    def state_of_stream(self):
+        state = self.command("show", STREAM)
+        if state.get("LoadState") != "loaded":
+            raise BrokerError("Streaming service unavailable")
+        if (state.get("ActiveState"), state.get("SubState")) == ("active", "running"):
+            return True
+        if (state.get("ActiveState"), state.get("SubState")) == ("inactive", "dead"):
+            return False
+        raise BrokerError("Streaming service not stable")
+
+    def stop_capture(self):
+        self.command("stop", CAPTURE)
+        state = self.command("show", CAPTURE)
+        if (state.get("LoadState") != "loaded" or state.get("ActiveState") not in ("inactive", "failed")
+                or state.get("ControlGroup") != ""):
+            raise BrokerError("Capture processes not confirmed stopped")
+
+    def clean_image(self):
+        try:
+            directory(self.work, self.uid, 0o077)
+        except FileNotFoundError:
+            return
+        (self.work / "capture.png").unlink(missing_ok=True)
+
+    def restore(self, marker):
+        # Must prove the dedicated cgroup has gone before allowing stream access.
+        self.stop_capture()
+        self.clean_image()
+        if marker["restore"]:
+            self.command("start", STREAM)
+            if not self.state_of_stream() or not self.ready():
+                raise BrokerError("Streaming service restoration unconfirmed")
+        elif marker["stop"]:
+            self.command("stop", STREAM)
+            if self.state_of_stream():
+                raise BrokerError("Operator stop not confirmed")
+        (self.state / "request.env").unlink(missing_ok=True)
+        (self.state / "transaction.json").unlink()
+        self.sync_directory()
+
+    def recover(self):
+        with self.locked():
+            marker = self.marker()
+            if marker is not None:
+                self.restore(marker)
+
+    def stop_stream(self):
+        # Root-only replacement for the operator stop path. Lock contention is a
+        # reported failure, never a misleading successful operator stop.
+        with self.locked():
+            self.write_marker(False, stop=True)
+            self.stop_capture()
+            self.clean_image()
+            self.command("stop", STREAM)
+            if self.state_of_stream():
+                raise BrokerError("Streaming service did not stop")
+            (self.state / "request.env").unlink(missing_ok=True)
+            (self.state / "transaction.json").unlink()
+            self.sync_directory()
+
+    def read_image(self, width, height):
+        data = read_file(self.work / "capture.png", self.uid, MAX_PNG, private=False)
+        validate_png(data, width, height)
+        return data
+
+    def capture(self, source):
+        width, height = request_data(source)
+        with self.locked():
+            if self.marker() is not None:
+                raise BrokerError("Recovery pending; capture blocked")
+            try:
+                coordinated = read_file(self.state / "operator-stop-v1", self.root_uid, 64)
+            except FileNotFoundError as error:
+                raise BrokerError("Operator stop coordination unavailable") from error
+            if coordinated != b"coordinated\n":
+                raise BrokerError("Operator stop coordination unavailable")
+            directory(self.work, self.uid, 0o077)
+            timer = self.command("show", TIMER)
+            if timer.get("LoadState") != "loaded" or timer.get("UnitFileState") != "enabled":
+                raise BrokerError("Boot recovery not enabled")
+            self.command("start", TIMER)
+            timer = self.command("show", TIMER)
+            if timer.get("ActiveState") != "active":
+                raise BrokerError("Recovery not armed")
+            restore = self.state_of_stream()
+            self.stop_capture()
+            self.clean_image()
+            self.atomic_write("request.env", f"WIDTH={width}\nHEIGHT={height}\n".encode("ascii"))
+            self.write_marker(restore)
+            try:
+                if restore:
+                    self.command("stop", STREAM)
+                if self.state_of_stream():
+                    raise BrokerError("Streaming service did not stop")
+                self.command("start", CAPTURE)
+                deadline = time.monotonic() + 45
+                while True:
+                    state = self.command("show", CAPTURE)
+                    if state.get("LoadState") != "loaded":
+                        raise BrokerError("Capture service unavailable")
+                    if state.get("ActiveState") == "inactive":
+                        if state.get("Result") != "success" or state.get("ExecMainStatus") != "0":
+                            raise BrokerError("Capture failed")
+                        break
+                    if state.get("ActiveState") not in ("active", "activating") or time.monotonic() >= deadline:
+                        raise BrokerError("Capture failed or timed out")
+                    time.sleep(0.1)
+                self.stop_capture()
+                data = self.read_image(width, height)
+            finally:
+                self.restore({"restore": restore, "stop": False})
+            return data
+
+
+def verify_installation(uid):
+    # Validate fixed trusted roots before taking a lock or importing any runtime.
+    for path in (Path("/"), Path("/usr"), Path("/usr/local"), Path("/usr/local/libexec"),
+                 Path("/var"), Path("/var/lib"), Path("/run"), Path("/run/remla-snapshot"),
+                 Path("/etc"), Path("/etc/systemd"), Path("/etc/systemd/system")):
+        directory(path, 0)
+    directory(STATE, 0, 0o077)
+    directory(WORK, uid, 0o077)
+    for path in (HELPER, Path("/etc/systemd/system") / CAPTURE,
+                 Path("/etc/systemd/system") / TIMER,
+                 Path("/etc/systemd/system/remla-snapshot-recovery.service")):
+        read_file(path, 0, 128_000)
+
+
+def main():
+    os.umask(0o077)
+    if os.geteuid() != 0 or sys.argv[1:] not in ([], ["--recover"], ["--stop-stream"]):
+        raise BrokerError("Invalid invocation")
+    account = pwd.getpwnam("remla")
+    if account.pw_uid == 0:
+        raise BrokerError("Invalid service account")
+    verify_installation(account.pw_uid)
+    broker = Broker(STATE, WORK, account.pw_uid, account.pw_gid)
+    if sys.argv[1:] == ["--recover"]:
+        broker.recover()
+    elif sys.argv[1:] == ["--stop-stream"]:
+        broker.stop_stream()
+    else:
+        data = broker.capture(sys.stdin.buffer)
+        sys.stdout.buffer.write(data)
+        sys.stdout.buffer.flush()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (BrokerError, OSError, KeyError, ValueError):
+        # Never forward worker output, configuration, paths or image bytes.
+        print("Snapshot broker failed; capture blocked or recovery pending", file=sys.stderr)
+        sys.exit(1)

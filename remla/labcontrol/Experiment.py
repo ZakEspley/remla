@@ -10,6 +10,7 @@ import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import datetime, timezone
+from http import HTTPStatus
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import quote
@@ -26,6 +27,9 @@ from remla.runtime_operations import (
     OwnershipManager,
 )
 from remla.settings import *
+from remla.snapshot_budget import SnapshotBudgetError
+from remla.snapshot_service import SnapshotBusy, SnapshotNotOwner, SnapshotService, SnapshotUnavailable
+from remla.snapshot_tickets import SnapshotTickets
 from remla.runtime_state import RuntimeStateStore, StateWriteError
 from remla.ui_state import UIState
 
@@ -122,6 +126,9 @@ class Experiment(object):
         self._state_publish_lock = asyncio.Lock()
         self._ui_state_publish_lock = asyncio.Lock()
         self.ui_state = UIState()
+        self.snapshot_tickets = SnapshotTickets()
+        self.snapshot_config = None
+        self.snapshot_service = SnapshotService()
 
         self.initializedStates = False
         self.admin = admin
@@ -403,6 +410,45 @@ class Experiment(object):
             await self.send_json_result(websocket, message_id, 200, True, message="UI state updated")
             return
 
+        if device_name == "Experiment" and command_name == "capture_still":
+            if not self.can_accept_commands(websocket) or websocket not in self.clients:
+                await self.send_json_result(websocket, message_id, 403, False, "not_owner", "You do not have control of the lab.")
+                return
+            if self.snapshot_config is None:
+                await self.send_json_result(websocket, message_id, 403, False, "snapshot_disabled", "Snapshots are not enabled for this lab.")
+                return
+            if parameters:
+                await self.send_json_result(websocket, message_id, 400, False, "invalid_parameters", "Snapshot parameters must be empty")
+                return
+            is_owner = lambda: websocket in self.clients and self.can_accept_commands(websocket)
+            try:
+                image = await self.snapshot_service.capture_png(self.snapshot_config, is_owner)
+            except SnapshotNotOwner:
+                await self.send_json_result(websocket, message_id, 403, False, "not_owner", "Control changed during capture")
+                return
+            except (SnapshotBusy, SnapshotBudgetError) as error:
+                await self.send_json_result(websocket, message_id, 429, False, "snapshot_limit", str(error))
+                return
+            except SnapshotUnavailable:
+                await self.send_json_result(websocket, message_id, 503, False, "snapshot_unavailable", "Snapshot could not be completed")
+                return
+            if not is_owner():
+                await self.send_json_result(websocket, message_id, 403, False, "not_owner", "Control changed during capture")
+                return
+            try:
+                token = self.snapshot_tickets.issue(websocket, image)
+            except ValueError:
+                await self.send_json_result(websocket, message_id, 503, False, "snapshot_unavailable", "Snapshot image was invalid")
+                return
+            await self.send_json_result(websocket, message_id, 200, True, data={
+                "width": self.snapshot_config.width,
+                "height": self.snapshot_config.height,
+                "mimeType": "image/png",
+                "downloadPath": "ws/snapshot",
+                "token": token,
+            }, message="Snapshot ready")
+            return
+
         if not self.can_accept_commands(websocket):
             await self.send_json_result(websocket, message_id, 403, False, "not_owner", "You do not have control of the lab.")
             return
@@ -463,6 +509,7 @@ class Experiment(object):
         task.add_done_callback(complete_task)
 
     async def disconnect_client(self, websocket):
+        self.snapshot_tickets.revoke(websocket)
         was_active_owner = websocket == self.ownership.active_owner
         was_handoff_user = websocket == self.ownership.handoff_user
         if was_active_owner:
@@ -697,6 +744,7 @@ class Experiment(object):
 
     async def enter_fault(self, message):
         self._runtime_state = "faulted"
+        self.snapshot_tickets.clear()
         self.last_fault = message
         self.clear_ui_state()
         await self.cancel_queued_operations()
@@ -868,6 +916,7 @@ class Experiment(object):
                     self.host,
                     self.port,
                     subprotocols=[JSON_SUBPROTOCOL],
+                    process_request=self.snapshot_http_response,
                 )
             )
             loop.run_forever()
@@ -876,14 +925,31 @@ class Experiment(object):
                 loop.run_until_complete(self.shutdown("server_stopped"))
             loop.close()
 
+    async def snapshot_http_response(self, path, request_headers):
+        if path != "/ws/snapshot":
+            if path.startswith("/ws/snapshot/"):
+                return HTTPStatus.NOT_FOUND, [("Cache-Control", "no-store")], b"Not found"
+            return None
+        authorization = request_headers.get("Authorization", "")
+        token = authorization[7:] if authorization.startswith("Bearer ") else ""
+        image = self.snapshot_tickets.consume(
+            token,
+            lambda owner: owner in self.clients and self.can_accept_commands(owner),
+        )
+        if image is None:
+            return HTTPStatus.NOT_FOUND, [("Cache-Control", "no-store")], b"Not found"
+        return HTTPStatus.OK, [
+            ("Content-Type", "image/png"),
+            ("Content-Disposition", 'attachment; filename="remla-snapshot.png"'),
+            ("Cache-Control", "no-store"),
+            ("X-Content-Type-Options", "nosniff"),
+        ], image
+
     async def sendDataToClient(self, websocket, dataStr: str):
         try:
             await websocket.send(dataStr)
         except ConnectionClosed:
-            logging.warning(
-                f"Failed to send message: {dataStr} - Connection was closed."
-            )
-            print(f"Failed to send message: {dataStr} - Connection was closed.")
+            logging.warning("Failed to send message: connection was closed")
 
     def uses_json_protocol(self, websocket):
         return getattr(websocket, "subprotocol", None) == JSON_SUBPROTOCOL
@@ -981,10 +1047,12 @@ class Experiment(object):
         for client in list(self.clients):
             await self.send_json_event(client, "ownership.queue", self.queue_state_for(client))
 
-    async def send_json_result(self, websocket, reply_id, status, ok, code=None, detail=None, message=None):
+    async def send_json_result(self, websocket, reply_id, status, ok, code=None, detail=None, message=None, data=None):
         payload = {"status": status, "ok": ok}
         if ok:
             payload["message"] = message
+            if data is not None:
+                payload["data"] = data
         else:
             payload["error"] = {"code": code, "detail": detail}
         frame = json.dumps(
@@ -1151,6 +1219,7 @@ class Experiment(object):
             logging.info("Shutting down experiment: %s", reason)
             fault_shutdown = self._runtime_state == "faulted" or reason == "fault"
             self._runtime_state = "stopping"
+            self.snapshot_tickets.clear()
             await self.publish_control_states()
             self.cancel_handoff_timeout()
             shutdown_error = None
