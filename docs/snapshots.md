@@ -87,16 +87,35 @@ Post-switch checks found the same active ReMLA and MediaMTX PIDs, zero automatic
 restarts, idle capture unit and clear recovery marker. No browser was refreshed
 or connected for this switch; an owner refresh to see the new module needs a
 safe window because disconnecting may reset or move devices.
-The 303-test backend and 46-test frontend suites pass locally. **No live
-capture under the new policy or two-browser acceptance has been run**; do not
-infer photo quality or physical safety from service health alone.
+The 303-test backend and 46-test frontend suites pass locally. The ledger has
+four charged attempts, but **no supervised browser acceptance under the new
+policy** has been completed; do not infer photo quality or physical safety
+from service health or charges alone.
 
-After this test rollout, local source hardening removed the logging/printing
-of failed WebSocket send frames (which can contain a one-use download token),
-and made the optional broker installer hold the broker's private transaction
-lock while replacing assets. These fixes are **not in photo1's installed test
-runtime**; update it only in a separately approved safe restart window. The
-hardware-free backend suite with these fixes passes 303 tests.
+**Token-log hardening rollout:** the operator approved a clear restart window.
+An offline wheel (SHA-256 `de2b17b6bb74d9e56c48a7ebab24fc1e12f1cd652cda6e5f48332afc181edd5f`)
+was installed into an isolated clone at
+`/opt/remla/releases/0.4.6-cyclic-camera-snapshot-tokenlog-de2b17b6bb74/venv`.
+All 32 packaged Python modules, `remla` entry point and Python symlinks were
+compared to the prior 10-second/100-attempt runtime: **only
+`remla/labcontrol/Experiment.py` changed**, removing failed-send frame contents
+from logs. A reviewed guarded switch stopped/started ReMLA once, preserving
+the installed YAML, frontend, 10-second/100-attempt ledger and broker. Exact
+prior runtime links and a **do-not-restore-over-new-charges** ledger copy are
+root-protected at `/opt/remla/backups/remla-snapshot-tokenlog-links-de2b17b6.txt`
+and `/opt/remla/backups/remla-snapshot-tokenlog-ledger-de2b17b6.json`; the
+root-owned switch script is at `/opt/remla/backups/remla-tokenlog-switch-de2b17b6.sh`.
+Read-only checks found ReMLA PID 188506 and unchanged MediaMTX PID 188119,
+both active with zero automatic restarts; active recovery timer, idle capture,
+clear marker, ready real `cam`, listening WebSocket, unchanged selected YAML,
+website hashes and four-entry budget bytes. No capture or browser connection
+was initiated for this rollout. The earlier 10-second/100-attempt runtime is
+the **immediate rollback** while snapshots remain enabled; it can read the
+current ledger. Do not switch straight to the older three-attempt runtime.
+
+The optional installer in committed source now holds the broker's private
+transaction lock while replacing assets. It was **not** run during this
+runtime-only rollout; the running root broker/recovery units were unchanged.
 
 **Rollback budget compatibility:** the prior snapshot runtime rejects a ledger
 with more than three entries *before* expiring old entries. If the new policy

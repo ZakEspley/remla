@@ -108,10 +108,10 @@ PY
     curl --fail --location --silent --show-error "$release_url/49-remla.rules" --output "$work_directory/49-remla.rules"
     (
         cd "$work_directory"
-        grep "  $(basename "$WHEEL")$" SHA256SUMS | sha256sum --check --status --
-        grep "  requirements.txt$" SHA256SUMS | sha256sum --check --status --
-        grep "  remla.service$" SHA256SUMS | sha256sum --check --status --
-        grep "  49-remla.rules$" SHA256SUMS | sha256sum --check --status --
+        for asset in "$(basename "$WHEEL")" requirements.txt remla.service 49-remla.rules; do
+            awk -v name="$asset" '$2 == name { print; found=1 } END { if (!found) exit 1 }' SHA256SUMS |
+                sha256sum --check --status -- || exit 1
+        done
     ) || fail "release checksum verification failed"
     ASSET_DIRECTORY="$work_directory"
 fi

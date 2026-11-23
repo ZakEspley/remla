@@ -1,3 +1,4 @@
+import hashlib
 import os
 import subprocess
 import sys
@@ -17,9 +18,53 @@ MAIN = ROOT / "remla" / "main.py"
 
 
 class PiInstallerTests(unittest.TestCase):
+    def test_downloaded_release_rejects_each_bad_or_missing_checksum(self):
+        assets = ["remla-0.5.0-py3-none-any.whl", "requirements.txt", "remla.service", "49-remla.rules"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in assets:
+                (root / name).write_bytes(name.encode())
+            curl = root / "curl"
+            curl.write_text(
+                '#!/bin/sh\n'
+                'while [ "$#" -gt 0 ]; do\n'
+                '  if [ "$1" = "--output" ]; then output="$2"; shift 2; else url="$1"; shift; fi\n'
+                'done\n'
+                'cp "$REMLA_TEST_ASSETS_DIR/${url##*/}" "$output"\n'
+            )
+            curl.chmod(0o755)
+            env = {**os.environ, "PATH": f"{root}:{os.environ['PATH']}",
+                   "REMLA_TEST_ASSETS_DIR": str(root), "REMLA_OPERATOR": "test-operator"}
+            for name in assets:
+                checksums = "".join(
+                    f"{hashlib.sha256((root / asset).read_bytes()).hexdigest()}  {asset}\n"
+                    for asset in assets
+                )
+                (root / "SHA256SUMS").write_text(checksums)
+                (root / name).write_bytes(b"corrupted")
+                with self.subTest(asset=name, case="corrupt"):
+                    result = subprocess.run(
+                        ["bash", str(INSTALLER), "--version", "0.5.0", "--dry-run"],
+                        env=env, text=True, capture_output=True,
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                (root / name).write_bytes(name.encode())
+                (root / "SHA256SUMS").write_text(
+                    "".join(line for line in checksums.splitlines(keepends=True)
+                            if not line.endswith(f"  {name}\n"))
+                )
+                with self.subTest(asset=name, case="missing"):
+                    result = subprocess.run(
+                        ["bash", str(INSTALLER), "--version", "0.5.0", "--dry-run"],
+                        env=env, text=True, capture_output=True,
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+
     def test_release_version_is_consistent(self):
-        self.assertIn('version = "0.4.6"', PYPROJECT.read_text())
-        self.assertIn('__version__ = "0.4.6"', MAIN.read_text())
+        self.assertEqual(tomllib.loads(PYPROJECT.read_text())["project"]["version"], "0.5.0")
+        self.assertIn('__version__ = "0.5.0"', MAIN.read_text())
+        lock = tomllib.loads((ROOT / "uv.lock").read_text())
+        self.assertEqual(next(pkg["version"] for pkg in lock["package"] if pkg["name"] == "remla"), "0.5.0")
 
     def test_installed_environment_uses_shared_configuration_paths(self):
         result = subprocess.run(
@@ -86,7 +131,8 @@ class PiInstallerTests(unittest.TestCase):
         self.assertIn("dist/install.sh", content)
         self.assertIn("dist/requirements.txt", content)
         self.assertIn("dist/SHA256SUMS", content)
-        self.assertIn("tests.test_web_deployment", content)
+        self.assertIn("unittest discover -s tests -t .", content)
+        self.assertIn("remla-*.tar.gz install.sh requirements.txt remla.service 49-remla.rules", content)
 
     def test_installer_copies_local_assets_before_service_user_installs_them(self):
         content = INSTALLER.read_text()

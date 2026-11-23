@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.11.*"
 
 [[package]]
@@ -401,7 +401,7 @@ wheels = [
 
 [[package]]
 name = "remla"
-version = "0.4.6"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "adafruit-circuitpython-motorkit" },
